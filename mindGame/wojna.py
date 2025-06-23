@@ -12,8 +12,12 @@ def wojna(a,b,ax,bx,bl,al):
     a.remove(al)
     b.remove(bl)
     zakryte=2
-    if len(a)+len(ax)<zakryte+1: return [-1,b,ax,bx,-1]
-    if len(b)+len(bx)<zakryte+1: return [a,-1,ax,bx,-1]
+    if len(a)+len(ax)<zakryte+1:
+        bx+=a+ax+[al,bl]
+        return [a,b,ax,bx,-1]
+    if len(b)+len(bx)<zakryte+1:
+        ax+=b+bx+[al,bl]
+        return [a,b,ax,bx,-2]
     wax,wbx=[],[]
     for i in range(zakryte):
         if len(a)==0:
@@ -35,13 +39,14 @@ def wojna(a,b,ax,bx,bl,al):
         b=bx
         bx=[]
     ak,bk=getA(a,bl),choice(b)
+    
     if ak==bk: 
         print("x")
-        return wojna(a,b,ax,bx,bk)
+        return wojna(a,b,ax,bx,bk,ak)
     elif ak>bk:
-        ax+=wax+wbx+[ak,bk,bl,bl]
+        ax+=wax+wbx+[ak,bk,bl,al]
     elif bk>ak:
-        bx+=wax+wbx+[ak,bk,bl,bl]
+        bx+=wax+wbx+[ak,bk,bl,al]
     a.remove(ak)
     b.remove(bk)
     return [a,b,ax,bx,bk]
@@ -68,9 +73,8 @@ def mecz(n):
         else:
             print([ak,bk])
             a,b,ax,bx,bl=wojna(a,b,ax,bx,bk,ak)
-            if bl ==-1:
-                if a==-1: return [0,len(b+bx),licznik*-1]
-                elif b==-1: return [len(a+ax),0,licznik*-1]
+            if bl <0:
+                return [len(a+ax),len(b+bx),licznik*-1]
         #print(ak,bk)
         licznik+=1
         if len(a)==0:
