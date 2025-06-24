@@ -1,89 +1,85 @@
 from random import choice
 
-def getA(a,bl):
-    if bl-1 in a: return bl-1
-    elif bl==0: return a[len(a)-1]
-    else:
-        for i in range(len(a)):
-            if bl-i in a: return bl-i
-    return a[len(a)-1]
-
-def wojna(a,b,ax,bx,bl,al):
-    a.remove(al)
-    b.remove(bl)
-    zakryte=2
-    if len(a)+len(ax)<zakryte+1:
-        bx+=a+ax+[al,bl]
-        return [a,b,ax,bx,-1]
-    if len(b)+len(bx)<zakryte+1:
-        ax+=b+bx+[al,bl]
-        return [a,b,ax,bx,-2]
-    wax,wbx=[],[]
-    for i in range(zakryte):
-        if len(a)==0:
-            a=ax
-            ax=[]
-        if len(b)==0:
-            b=bx
-            bx=[]
-        ak=choice(a)
-        bk=choice(b)
-        wax.append(ak)
-        wbx.append(bk)
-        a.remove(ak)
-        b.remove(bk)
-    if len(a)==0:
-        a=ax
-        ax=[]
-    if len(b)==0:
-        b=bx
-        bx=[]
-    ak,bk=getA(a,bl),choice(b)
+class Gracz():
+    def __init__(self):
+        self.reka = []
+        self.odrzucone = []
+        self.karta = -1
     
-    if ak==bk: 
-        print("x")
-        return wojna(a,b,ax,bx,bk,ak)
-    elif ak>bk:
-        ax+=wax+wbx+[ak,bk,bl,al]
-    elif bk>ak:
-        bx+=wax+wbx+[ak,bk,bl,al]
-    a.remove(ak)
-    b.remove(bk)
-    return [a,b,ax,bx,bk]
+    def suma(self):
+        return len(self.reka)+len(self.odrzucone)
+    
+    def losuj(self):
+        self.check()
+        self.karta = choice(self.reka)
+        self.reka.remove(self.karta)
+        
+    def kartA(self, bl: int):
+        self.check()
+        opcje = sorted([k for k in self.reka if k < bl], reverse=True)
+        self.karta = opcje[0] if opcje else max(self.reka)
+        self.reka.remove(self.karta)
+        
+    def check(self):
+        if self.reka==[]:
+            self.reka=self.odrzucone
+            self.odrzucone=[]
+
+def wojna(A:Gracz,B:Gracz,stawka:list):
+    zakryte=1 #Zmień jeśli chcesz ;)
+    if A.suma()<zakryte+1:
+        B.odrzucone+=A.reka+A.odrzucone+stawka
+        A.reka,A.odrzucone=[],[]
+        return [A,B]
+    if B.suma()<zakryte+1:
+        A.odrzucone+=B.reka+B.odrzucone+stawka
+        B.reka,B.odrzucone=[],[]
+        return [A,B]
+    
+    for i in range(zakryte):
+        A.losuj()
+        B.losuj()
+        stawka+=[A.karta,B.karta]
+        
+    A.kartA(B.karta)
+    B.losuj()
+    stawka+=[A.karta,B.karta]
+    
+    if A.karta==B.karta: 
+        #print("x")
+        return wojna(A,B,stawka)
+    elif A.karta>B.karta:
+        A.odrzucone+=stawka
+    elif B.karta>A.karta:
+        B.odrzucone+=stawka
+    return [A,B]
 
 def mecz(n):
-    a=[x for x in range(n)]
-    b=[x for x in range(n)]
+    A,B=Gracz(),Gracz()
+    A.reka=[x for x in range(n)]
+    B.reka=[x for x in range(n)]
     bl=-1000000
-    ax=[]
-    bx=[]
     licznik=0
-    while len(a)>0 and len(b)>0:
-        ak,bk=getA(a,bl),choice(b)
-        if ak>bk:
-            ax+=[ak,bk]
-            a.remove(ak)
-            b.remove(bk)
-            bl=bk
-        elif bk>ak:
-            bx+=[ak,bk]
-            a.remove(ak)
-            b.remove(bk)
-            bl=bk        
+    while len(A.reka)>0 and len(B.reka)>0:
+        A.kartA(bl)
+        B.losuj()
+        if A.karta>B.karta:
+            A.odrzucone+=[A.karta,B.karta]
+            bl=B.karta
+        elif B.karta>A.karta:
+            B.odrzucone+=[A.karta,B.karta]
+            bl=B.karta
         else:
-            print([ak,bk])
-            a,b,ax,bx,bl=wojna(a,b,ax,bx,bk,ak)
-            if bl <0:
-                return [len(a+ax),len(b+bx),licznik*-1]
+            #print([A.karta,B.karta])
+            A,B=wojna(A,B,[A.karta,B.karta])
+            bl=B.karta
+            if A.suma()==0 or B.suma()==0:
+                return [A.suma(),B.suma(),-licznik]
         #print(ak,bk)
         licznik+=1
-        if len(a)==0:
-            a=ax
-            ax=[]
-        if len(b)==0:
-            b=bx
-            bx=[]
-    return [len(a+ax),len(b+bx),licznik]
+        A.check()
+        B.check()
+    return [A.suma(),B.suma(),licznik]
 
 def turniej(n,metoda,l):
     total=[0,0,0]
@@ -93,9 +89,4 @@ def turniej(n,metoda,l):
         elif score[1]>score[0]: total[1]+=1
         else: total[2]+=1
     return total
-#print(turniej(1000000,mecz,20))
-for i in range(1):
-    w=mecz(10)
-    if w[0]==20 or w[1]==20: print(w)
-    elif w[2]<0: print([[w]])
-    else: print([w])
+print(turniej(1000,mecz,20))
