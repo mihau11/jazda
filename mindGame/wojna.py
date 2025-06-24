@@ -1,4 +1,4 @@
-from random import choice
+from random import choice, shuffle
 
 class Gracz():
     def __init__(self):
@@ -26,7 +26,7 @@ class Gracz():
             self.odrzucone=[]
 
 def wojna(A:Gracz,B:Gracz,stawka:list):
-    zakryte=1 #Zmień jeśli chcesz ;)
+    zakryte=1 ######################################Zmień jeśli chcesz ;)
     if A.suma()<zakryte+1:
         B.odrzucone+=A.reka+A.odrzucone+stawka
         A.reka,A.odrzucone=[],[]
@@ -41,7 +41,8 @@ def wojna(A:Gracz,B:Gracz,stawka:list):
         B.losuj()
         stawka+=[A.karta,B.karta]
         
-    A.kartA(B.karta)
+    #A.kartA(B.karta) ##################################Zmień jeśli chcesz ;)
+    A.losuj()
     B.losuj()
     stawka+=[A.karta,B.karta]
     
@@ -56,12 +57,18 @@ def wojna(A:Gracz,B:Gracz,stawka:list):
 
 def mecz(n):
     A,B=Gracz(),Gracz()
-    A.reka=[x for x in range(n)]
-    B.reka=[x for x in range(n)]
+    
+    talia=[x for y in range(4) for x in range(n)]
+    shuffle(talia)
+    A.reka=talia[0:2*n]
+    B.reka=talia[2*n:4*n]
+    # A.reka=[x for x in range(n)]
+    # B.reka=[x for x in range(n)]
     bl=-1000000
     licznik=0
     while len(A.reka)>0 and len(B.reka)>0:
-        A.kartA(bl)
+        #A.kartA(bl) ####################################Zmień jeśli chcesz
+        A.losuj()
         B.losuj()
         if A.karta>B.karta:
             A.odrzucone+=[A.karta,B.karta]
@@ -74,7 +81,7 @@ def mecz(n):
             A,B=wojna(A,B,[A.karta,B.karta])
             bl=B.karta
             if A.suma()==0 or B.suma()==0:
-                return [A.suma(),B.suma(),-licznik]
+                return [A.suma(),B.suma(),licznik]
         #print(ak,bk)
         licznik+=1
         A.check()
@@ -82,11 +89,13 @@ def mecz(n):
     return [A.suma(),B.suma(),licznik]
 
 def turniej(n,metoda,l):
-    total=[0,0,0]
+    total=[0,0,0,0]
     for i in range(n):
         score=metoda(l)
         if score[0]>score[1]: total[0]+=1
         elif score[1]>score[0]: total[1]+=1
         else: total[2]+=1
+        total[3]+=score[2]
+    total[3]//=n
     return total
-print(turniej(1000,mecz,20))
+print(turniej(1000000,mecz,20))
