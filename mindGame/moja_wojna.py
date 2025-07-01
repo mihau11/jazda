@@ -50,9 +50,9 @@ def wojna(A:Gracz,B:Gracz,stawka:list):
         B.losuj()
         stawka+=[A.karta,B.karta]
         
-    #A.kartA(B.karta) ##################################Zmień jeśli chcesz ;)
+    A.kartA(B.karta) ##################################Zmień jeśli chcesz ;)
     #A.losuj()
-    A.wybierz()
+    #A.wybierz()
     B.losuj()
     print(f"Bot: {B.karta}")
     stawka+=[A.karta,B.karta]
@@ -78,9 +78,9 @@ def mecz(n,p):
     bl=-1000000
     licznik=0
     while len(A.reka)>0 and len(B.reka)>0:
-        #A.kartA(bl) ####################################Zmień jeśli chcesz
+        A.kartA(bl) ####################################Zmień jeśli chcesz
         #A.losuj()
-        A.wybierz()
+        #A.wybierz()
         B.losuj()
         print(f"Bot: {B.karta}")
         if A.karta>B.karta:

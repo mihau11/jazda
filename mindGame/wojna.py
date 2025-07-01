@@ -40,10 +40,12 @@ def wojna(A:Gracz,B:Gracz,stawka:list):
         A.losuj()
         B.losuj()
         stawka+=[A.karta,B.karta]
-        
-    #A.kartA(B.karta) ##################################Zmień jeśli chcesz ;)
-    A.losuj()
-    B.losuj()
+    
+    al=A.karta    
+    A.kartA(B.karta) ##################################Zmień jeśli chcesz ;)
+    #A.losuj()
+    #B.losuj()
+    B.kartA(al)
     stawka+=[A.karta,B.karta]
     
     if A.karta==B.karta: 
@@ -65,20 +67,25 @@ def mecz(n):
     # A.reka=[x for x in range(n)]
     # B.reka=[x for x in range(n)]
     bl=-1000000
+    al=-11
     licznik=0
     while len(A.reka)>0 and len(B.reka)>0:
-        #A.kartA(bl) ####################################Zmień jeśli chcesz
-        A.losuj()
-        B.losuj()
+        A.kartA(bl) ####################################Zmień jeśli chcesz
+        #A.losuj()
+        #B.losuj()
+        B.kartA(al)
         if A.karta>B.karta:
             A.odrzucone+=[A.karta,B.karta]
+            al=A.karta
             bl=B.karta
         elif B.karta>A.karta:
             B.odrzucone+=[A.karta,B.karta]
+            al=A.karta
             bl=B.karta
         else:
             #print([A.karta,B.karta])
             A,B=wojna(A,B,[A.karta,B.karta])
+            al=A.karta
             bl=B.karta
             if A.suma()==0 or B.suma()==0:
                 return [A.suma(),B.suma(),licznik]
@@ -86,6 +93,7 @@ def mecz(n):
         licznik+=1
         A.check()
         B.check()
+        if licznik > 100000: return [0,0,0]
     return [A.suma(),B.suma(),licznik]
 
 def turniej(n,metoda,l):
@@ -98,4 +106,4 @@ def turniej(n,metoda,l):
         total[3]+=score[2]
     total[3]//=n
     return total
-print(turniej(1000000,mecz,20))
+print(turniej(100000,mecz,13))
