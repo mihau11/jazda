@@ -79,7 +79,7 @@ class UserPlayer(Player):
     def handle_input(self, keys, puck, opponent_goal):
         self.current_speed = self.speed
         if keys[pygame.K_SPACE]:
-            self.current_speed = PLAYER_BOOST_SPEED
+            self.current_speed = self.speed * 2
 
         if keys[pygame.K_w]:
             self.y -= self.current_speed

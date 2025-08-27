@@ -42,12 +42,65 @@ def show_menu(screen):
         
         pygame.display.flip()
 
-def show_pause_screen(screen):
+def show_settings_menu(screen, game_settings):
+    font = pygame.font.Font(None, 60)
+    small_font = pygame.font.Font(None, 40)
+    
+    settings_options = [
+        ("Puck Speed", "puck_speed", PUCK_SPEED_RANGE),
+        ("Puck Radius", "puck_radius", PUCK_RADIUS_RANGE),
+        ("Player Radius", "player_radius", PLAYER_RADIUS_RANGE),
+        ("Goalkeeper Height", "goalkeeper_height", GOALKEEPER_HEIGHT_RANGE),
+        ("User Speed", "user_speed", USER_SPEED_RANGE),
+        ("AI Speed", "ai_speed", AI_SPEED_RANGE)
+    ]
+    
+    selected_option = 0
+    running = True
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return False
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    return True
+                elif event.key == pygame.K_UP:
+                    selected_option = (selected_option - 1) % len(settings_options)
+                elif event.key == pygame.K_DOWN:
+                    selected_option = (selected_option + 1) % len(settings_options)
+                elif event.key == pygame.K_LEFT:
+                    setting_name = settings_options[selected_option][1]
+                    min_val, max_val = settings_options[selected_option][2]
+                    game_settings[setting_name] = max(min_val, game_settings[setting_name] - 1)
+                elif event.key == pygame.K_RIGHT:
+                    setting_name = settings_options[selected_option][1]
+                    min_val, max_val = settings_options[selected_option][2]
+                    game_settings[setting_name] = min(max_val, game_settings[setting_name] + 1)
+
+        screen.fill(DARK_GRAY)
+        
+        title_text = font.render("SETTINGS", True, ORANGE)
+        screen.blit(title_text, (SCREEN_WIDTH // 2 - title_text.get_width() // 2, 100))
+        
+        for i, (display_name, setting_name, _) in enumerate(settings_options):
+            color = ORANGE if i == selected_option else WHITE
+            value = game_settings[setting_name]
+            text = small_font.render(f"{display_name}: {value}", True, color)
+            y_pos = 250 + i * 60
+            screen.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2, y_pos))
+        
+        instructions = small_font.render("Use arrows to navigate and adjust. ESC to return.", True, WHITE)
+        screen.blit(instructions, (SCREEN_WIDTH // 2 - instructions.get_width() // 2, SCREEN_HEIGHT - 100))
+        
+        pygame.display.flip()
+
+def show_pause_screen(screen, game_settings):
     font = pygame.font.Font(None, 100)
     small_font = pygame.font.Font(None, 50)
     
     pause_text = font.render("PAUSED", True, ORANGE)
     menu_text = small_font.render("Press M to return to Menu", True, ORANGE)
+    settings_text = small_font.render("Press S for Settings", True, ORANGE)
     
     # Create a semi-transparent overlay
     overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
@@ -56,9 +109,20 @@ def show_pause_screen(screen):
 
     screen.blit(pause_text, (SCREEN_WIDTH // 2 - pause_text.get_width() // 2, SCREEN_HEIGHT // 3))
     screen.blit(menu_text, (SCREEN_WIDTH // 2 - menu_text.get_width() // 2, SCREEN_HEIGHT * 2/3))
+    screen.blit(settings_text, (SCREEN_WIDTH // 2 - settings_text.get_width() // 2, SCREEN_HEIGHT * 2/3 + 60))
 
 def game_loop(screen, player_config):
     clock = pygame.time.Clock()
+
+    # Initialize game settings
+    game_settings = {
+        'puck_speed': PUCK_SPEED,
+        'puck_radius': PUCK_RADIUS,
+        'player_radius': PLAYER_RADIUS,
+        'goalkeeper_height': GOALKEEPER_HEIGHT,
+        'user_speed': PLAYER_SPEED,
+        'ai_speed': PLAYER_SPEED * 0.8
+    }
 
     puck = Puck(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
     user_player = UserPlayer(SCREEN_WIDTH // 4, SCREEN_HEIGHT // 2)
@@ -98,9 +162,24 @@ def game_loop(screen, player_config):
                     paused = not paused
                 if event.key == pygame.K_m and paused:
                     return 'MENU'
+                if event.key == pygame.K_s and paused:
+                    if not show_settings_menu(screen, game_settings):
+                        return 'QUIT'
+                    # Update game objects with new settings
+                    puck.speed = game_settings['puck_speed']
+                    puck.radius = game_settings['puck_radius']
+                    user_player.radius = game_settings['player_radius']
+                    user_player.speed = game_settings['user_speed']
+                    user_goalie.height = game_settings['goalkeeper_height']
+                    user_goalie.rect.height = game_settings['goalkeeper_height']
+                    ai_goalie.height = game_settings['goalkeeper_height']
+                    ai_goalie.rect.height = game_settings['goalkeeper_height']
+                    for player in ai_players + user_team:
+                        player.radius = game_settings['player_radius']
+                        player.speed = game_settings['ai_speed']
 
         if paused:
-            show_pause_screen(screen)
+            show_pause_screen(screen, game_settings)
         else:
             keys = pygame.key.get_pressed()
             opponent_goal_pos = (SCREEN_WIDTH, SCREEN_HEIGHT // 2)
