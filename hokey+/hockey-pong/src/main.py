@@ -196,9 +196,10 @@ def game_loop(screen, player_config):
             ai_goalie.check_block(puck)
 
             for player in ai_players:
-                player.update(puck, user_goal_pos)
+                player.update(puck, user_goal_pos, ai_players)
             for player in user_team:
-                player.update(puck, opponent_goal_pos) # Teammates aim for opponent goal
+                all_user_players = [user_player] + user_team
+                player.update(puck, opponent_goal_pos, all_user_players) # Teammates aim for opponent goal
 
             # --- Player Collision Resolution ---
             all_players = [user_player] + user_team + ai_players

@@ -1,8 +1,8 @@
 import pygame
 
 # Screen dimensions
-SCREEN_WIDTH = 1280
-SCREEN_HEIGHT = 720
+SCREEN_WIDTH = 1200
+SCREEN_HEIGHT = 800
 
 # Colors
 WHITE = (255, 255, 255)
@@ -23,6 +23,8 @@ GOALKEEPER_WIDTH = 25
 GOALKEEPER_HEIGHT = 50
 STRIKE_COOLDOWN = 0.5  # in seconds
 STRIKE_DISTANCE = 30
+PUCK_FRICTION = 0.99  # Friction factor (0.99 means 1% speed loss per frame)
+STRIKE_SPEED_VARIATION = 0.2  # 20% speed variation when striking
 
 # Settings ranges for customization
 PUCK_SPEED_RANGE = (5, 20)
