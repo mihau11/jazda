@@ -77,10 +77,32 @@ class Player:
         pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), self.radius)
 
 class UserPlayer(Player):
-    def __init__(self, x, y):
+    def __init__(self, x, y, zone=None):
         super().__init__(x, y, BLUE, PLAYER_SPEED, PLAYER_RADIUS)
         self.boost_active = False
         self.current_speed = self.speed
+        self.zone = zone
+
+    def return_to_zone(self):
+        if not self.zone:
+            return True # No zone assigned, can't return
+        zone_x, zone_y, zone_w, zone_h = self.zone
+        target_x = zone_x + zone_w / 2
+        target_y = zone_y + zone_h / 2
+
+        dx = target_x - self.x
+        dy = target_y - self.y
+        dist = math.sqrt(dx**2 + dy**2)
+
+        if dist < 5: # Close enough
+            self.x = target_x
+            self.y = target_y
+            return True
+
+        # Move slowly
+        self.x += (dx / dist) * 2
+        self.y += (dy / dist) * 2
+        return False
 
     def handle_input(self, keys, puck, opponent_goal):
         self.current_speed = self.speed
@@ -100,20 +122,31 @@ class UserPlayer(Player):
         # Strike logic with boost consideration
         strike_multiplier = 2.0 if boost_active else 1.0
         
+        # New shooting controls
+        if keys[pygame.K_i]: # Up
+            self.strike(puck, 0, -PUCK_SPEED * strike_multiplier)
+        if keys[pygame.K_COMMA]: # Down
+            self.strike(puck, 0, PUCK_SPEED * strike_multiplier)
         if keys[pygame.K_j]: # Left
             self.strike(puck, -PUCK_SPEED * strike_multiplier, 0)
         if keys[pygame.K_l]: # Right
             self.strike(puck, PUCK_SPEED * strike_multiplier, 0)
-        if keys[pygame.K_i]: # Up
-            self.strike(puck, 0, -PUCK_SPEED * strike_multiplier)
-        if keys[pygame.K_k]: # Down
-            self.strike(puck, 0, PUCK_SPEED * strike_multiplier)
-        if keys[pygame.K_m]: # Towards opponent goal
+        
+        # Diagonal shots
+        diag_speed = PUCK_SPEED * strike_multiplier / math.sqrt(2)
+        if keys[pygame.K_o]: # Up-Right
+            self.strike(puck, diag_speed, -diag_speed)
+        if keys[pygame.K_u]: # Up-Left
+            self.strike(puck, -diag_speed, -diag_speed)
+        if keys[pygame.K_m]: # Down-Left
+            self.strike(puck, -diag_speed, diag_speed)
+        if keys[pygame.K_PERIOD]: # Down-Right
+            self.strike(puck, diag_speed, diag_speed)
+
+        # Shot at goal
+        if keys[pygame.K_k]:
             goal_center_x, goal_center_y = opponent_goal
-            # Add randomness to the Y target within the goal area
-            goal_y_start = (SCREEN_HEIGHT - GOAL_HEIGHT) // 2
-            goal_y_end = goal_y_start + GOAL_HEIGHT
-            random_y = random.uniform(goal_y_start, goal_y_end)
+            random_y = random.uniform((SCREEN_HEIGHT - GOAL_HEIGHT) // 2, (SCREEN_HEIGHT + GOAL_HEIGHT) // 2)
             angle = math.atan2(random_y - self.y, goal_center_x - self.x)
             dx = PUCK_SPEED * math.cos(angle) * strike_multiplier
             dy = PUCK_SPEED * math.sin(angle) * strike_multiplier
@@ -125,96 +158,107 @@ class UserPlayer(Player):
         self.y = max(self.radius, min(self.y, SCREEN_HEIGHT - self.radius))
 
 class AIPlayer(Player):
-    def __init__(self, x, y, team='ai', can_cross_center=False):
+    def __init__(self, x, y, team='ai', position=None):
         self.team = team
-        self.can_cross_center = can_cross_center
+        self.position = position
+        self.zone = ZONES[team][position]
         color = BLUE if self.team == 'user' else RED
         super().__init__(x, y, color, PLAYER_SPEED * 0.8, PLAYER_RADIUS)
 
     def update(self, puck, target_goal, teammates):
-        # Check if any teammate is close to the puck (within striking distance)
-        teammate_near_puck = False
-        for teammate in teammates:
-            if teammate != self:
-                distance_to_puck = math.sqrt((teammate.x - puck.x)**2 + (teammate.y - puck.y)**2)
-                if distance_to_puck <= STRIKE_DISTANCE + teammate.radius:
-                    teammate_near_puck = True
-                    break
-        
-        if teammate_near_puck:
-            # Position for a pass - move to a good passing position
-            # Move to a position that's closer to the target goal but not too close to the puck
-            ideal_x = (puck.x + target_goal[0]) / 2
-            ideal_y = (puck.y + target_goal[1]) / 2
-            
-            # Add some spread to avoid all teammates going to the same spot
-            spread_offset = hash(id(self)) % 100 - 50  # Use object id for consistent but different offsets
-            ideal_y += spread_offset
-            
-            if self.x < ideal_x:
-                self.x += self.speed
-            elif self.x > ideal_x:
-                self.x -= self.speed
-                
-            if self.y < ideal_y:
-                self.y += self.speed
-            elif self.y > ideal_y:
-                self.y -= self.speed
-        else:
-            # Normal AI movement: follow the puck
-            if self.y < puck.y:
-                self.y += self.speed
-            elif self.y > puck.y:
-                self.y -= self.speed
-            
-            if self.x < puck.x:
-                 self.x += self.speed
-            elif self.x > puck.x:
-                 self.x -= self.speed
+        # Determine the target position
+        target_x, target_y = self.get_target_position(puck, teammates)
 
-        # Keep within screen bounds (no more team-based restrictions)
+        # Move towards the target position
+        if self.x < target_x:
+            self.x += self.speed
+        elif self.x > target_x:
+            self.x -= self.speed
+            
+        if self.y < target_y:
+            self.y += self.speed
+        elif self.y > target_y:
+            self.y -= self.speed
+
+        # Keep within screen bounds
         self.x = max(self.radius, min(self.x, SCREEN_WIDTH - self.radius))
         self.y = max(self.radius, min(self.y, SCREEN_HEIGHT - self.radius))
 
-        # AI striking - only strike if no teammate is closer to the puck
+        # AI striking logic
+        self.handle_striking(puck, target_goal, teammates)
+
+    def return_to_zone(self):
+        zone_x, zone_y, zone_w, zone_h = self.zone
+        target_x = zone_x + zone_w / 2
+        target_y = zone_y + zone_h / 2
+
+        # Move towards the zone center
+        dx = target_x - self.x
+        dy = target_y - self.y
+        dist = math.sqrt(dx**2 + dy**2)
+
+        if dist > self.speed:
+            self.x += (dx / dist) * self.speed
+            self.y += (dy / dist) * self.speed
+        else:
+            self.x = target_x
+            self.y = target_y
+        
+        return dist < 2 # Return True if close enough to target
+
+    def handle_striking(self, puck, target_goal, teammates):
         my_distance_to_puck = math.sqrt((self.x - puck.x)**2 + (self.y - puck.y)**2)
-        should_strike = True
         
-        for teammate in teammates:
-            if teammate != self:
-                teammate_distance = math.sqrt((teammate.x - puck.x)**2 + (teammate.y - puck.y)**2)
-                if teammate_distance < my_distance_to_puck:
-                    should_strike = False
-                    break
-        
-        if should_strike and my_distance_to_puck < STRIKE_DISTANCE + self.radius:
+        # Check if I am the closest teammate to the puck
+        is_closest = all(
+            my_distance_to_puck <= math.sqrt((teammate.x - puck.x)**2 + (teammate.y - puck.y)**2)
+            for teammate in teammates if teammate != self
+        )
+
+        if is_closest and my_distance_to_puck < STRIKE_DISTANCE + self.radius:
             # Find the teammate closest to the enemy goal
             closest_to_goal = None
-            closest_goal_distance = float('inf')
-            
+            min_goal_dist = float('inf')
             for teammate in teammates:
                 if teammate != self:
-                    goal_distance = math.sqrt((teammate.x - target_goal[0])**2 + (teammate.y - target_goal[1])**2)
-                    if goal_distance < closest_goal_distance:
-                        closest_goal_distance = goal_distance
+                    dist = math.sqrt((teammate.x - target_goal[0])**2 + (teammate.y - target_goal[1])**2)
+                    if dist < min_goal_dist:
+                        min_goal_dist = dist
                         closest_to_goal = teammate
             
-            # Check if I am the closest to the goal
-            my_goal_distance = math.sqrt((self.x - target_goal[0])**2 + (self.y - target_goal[1])**2)
-            
-            if closest_to_goal is not None and my_goal_distance > closest_goal_distance:
-                # Pass to the teammate closest to the goal (double strength)
+            my_goal_dist = math.sqrt((self.x - target_goal[0])**2 + (self.y - target_goal[1])**2)
+
+            if closest_to_goal and my_goal_dist > min_goal_dist:
+                # Pass to the teammate closest to the goal
                 angle = math.atan2(closest_to_goal.y - self.y, closest_to_goal.x - self.x)
-                dx = PUCK_SPEED * 2 * math.cos(angle)  # Double strength for passes
-                dy = PUCK_SPEED * 2 * math.sin(angle)  # Double strength for passes
+                dx = PUCK_SPEED * 2 * math.cos(angle)
+                dy = PUCK_SPEED * 2 * math.sin(angle)
                 self.strike(puck, dx, dy)
             else:
-                # I am closest to goal, so strike at the goal
-                goal_center_x, goal_center_y = target_goal
-                angle = math.atan2(goal_center_y - self.y, goal_center_x - self.x)
+                # Strike at the goal
+                angle = math.atan2(target_goal[1] - self.y, target_goal[0] - self.x)
                 dx = PUCK_SPEED * math.cos(angle)
                 dy = PUCK_SPEED * math.sin(angle)
                 self.strike(puck, dx, dy)
+
+    def get_target_position(self, puck, teammates):
+        # Check if a teammate is close to the puck
+        teammate_near_puck = any(
+            math.sqrt((teammate.x - puck.x)**2 + (teammate.y - puck.y)**2) <= STRIKE_DISTANCE + teammate.radius
+            for teammate in teammates if teammate != self
+        )
+
+        zone_x, zone_y, zone_w, zone_h = self.zone
+        zone_center_x = zone_x + zone_w / 2
+        zone_center_y = zone_y + zone_h / 2
+
+        # If puck is far or a teammate has it, stay in zone
+        puck_in_zone = zone_x < puck.x < zone_x + zone_w and zone_y < puck.y < zone_y + zone_h
+        if teammate_near_puck or not puck_in_zone:
+            return zone_center_x, zone_center_y
+        else:
+            # If puck is in zone and no one has it, go for it
+            return puck.x, puck.y
 
 class Goalkeeper(Player):
     def __init__(self, x, y, is_user_goalie=False):

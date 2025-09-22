@@ -26,6 +26,23 @@ STRIKE_DISTANCE = 30
 PUCK_FRICTION = 0.99  # Friction factor (0.99 means 1% speed loss per frame)
 STRIKE_SPEED_VARIATION = 0.2  # 20% speed variation when striking
 
+# Positional Play Zones
+# (x, y, width, height)
+ZONES = {
+    'user': {
+        'left_attack': (SCREEN_WIDTH / 2, 0, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2),
+        'right_attack': (SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2),
+        'left_defense': (0, 0, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2),
+        'right_defense': (0, SCREEN_HEIGHT / 2, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2),
+    },
+    'ai': {
+        'left_attack': (0, 0, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2),
+        'right_attack': (0, SCREEN_HEIGHT / 2, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2),
+        'left_defense': (SCREEN_WIDTH / 2, 0, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2),
+        'right_defense': (SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2),
+    }
+}
+
 # Settings ranges for customization
 PUCK_SPEED_RANGE = (5, 20)
 PUCK_RADIUS_RANGE = (5, 20)
