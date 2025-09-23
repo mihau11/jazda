@@ -3,10 +3,10 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 # --- Email Configuration ---
-sender_email = "agent11mamrot@gmail.com"
-receiver_email = ["erpniewski@gmail.com","jakub.wegrzynek@jit.team"]
+sender_email = "agent11mamrot@gmail.com" #you better use your own e-mail
+receiver_email = ["add","here","any","e-mails"]
 receiver_id=0
-password = "uzpy leqz aodq mmgf"  # Use an App Password for Gmail
+password = "uzpy leqz aodq m{use your own app password}gf"  # Use an App Password for Gmail
 
 # --- Email Content ---
 subject = "Test Email from Python"
