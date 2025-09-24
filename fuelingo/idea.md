@@ -9,9 +9,22 @@
 
 Sustain a successful offensive for **three consecutive days** while managing troop strength, morale, and a fragile supply line against a reactive enemy. Victory is achieved by maintaining this streak; defeat occurs if your frontline integrity or infantry drops to zero.
 
----
 
 ## Gameplay Loop
+
+---
+
+## Project Structure & Refactoring
+
+To improve clarity and maintainability, the codebase has been refactored:
+
+- `main.py`: Main entry point, contains only the application logic and UI orchestration.
+- `game_logic.py`: Contains the `GameLogic` class with all game mechanics and state management.
+- `windows.py`: Contains all Tkinter window classes (`DailySummaryWindow`, `DispatchWindow`, `ReinforcementWindow`) for pop-up dialogs and UI components.
+
+Recent changes:
+- Game logic and window classes have been exported to their own files.
+- The daily summary window now pops up on the right half of the main window for improved UX.
 
 Each day (turn) consists of:
 1. **Assess Situation:** Review dashboard for army, depot, frontline, and intel status.
