@@ -69,7 +69,20 @@ Each day (turn) consists of:
 - **Army Dots:** Visual grid for unit strength (dots disappear as losses occur)
 - **Supply Graph:** 30-day history, filterable by resource, color-coded by stance
 - **Convoy Visualization:** Shown under depot/intel section
-- **Footer Actions:** All main actions (stance, convoy, intel, end day) are spread horizontally at the bottom
+- **Footer Actions:** All main actions (stance, convoy, intel, end day, help) are spread horizontally at the bottom
+- **Help Button:** A '?' button opens a popup window explaining all intel actions and the difference between trucks and train convoys
+## Help & Info Popup
+
+Click the "?" button in the footer to open a help window. The popup explains:
+
+- **Intel Actions:**
+    - Secure Route (10 Intel): Reduces the chance of convoy ambush for the next day.
+    - Identify Weakness (25 Intel): Reduces casualties on your next successful offensive.
+    - Forecast Consumption (5 Intel): Removes random variance from tomorrow's supply needs, allowing perfect planning.
+
+- **Convoy Types:**
+    - Trucks: Small, flexible, always available. Good for frequent, modest resupply.
+    - Train: Large, delivers massive supplies in one trip, but has a cooldown after use. Using trains increases enemy disruption and ambush risk.
 - **Pop-ups:** After Action Reports and Reinforcement choices are modal
 
 ---

@@ -262,10 +262,36 @@ class LogisticsCommandGUI(tk.Tk):
         self.intel_btn_weakness = tk.Button(intel_frame, text="Identify Weakness (25)", command=lambda: self.spend_intel("weakness")); self.intel_btn_weakness.pack(side='left', padx=2, pady=2)
         self.intel_btn_forecast = tk.Button(intel_frame, text="Forecast (5)", command=lambda: self.spend_intel("forecast")); self.intel_btn_forecast.pack(side='left', padx=2, pady=2)
 
-        endday_frame = tk.Frame(footer_frame, bg='gray90'); endday_frame.pack(side='right', padx=30)
+        # Help button
+        help_frame = tk.Frame(footer_frame, bg='gray90'); help_frame.pack(side='right', padx=5)
+        self.help_btn = tk.Button(help_frame, text="?", font=('Helvetica', 16, 'bold'), width=2, command=self.show_help_popup)
+        self.help_btn.pack(pady=2, padx=2)
+
+        endday_frame = tk.Frame(footer_frame, bg='gray90'); endday_frame.pack(side='right', padx=5)
         self.end_day_btn = tk.Button(endday_frame, text="END DAY", font=('Helvetica', 16, 'bold'), bg='darkgreen', fg='white', command=self.end_day_click)
         self.end_day_btn.pack(pady=2, padx=10, ipadx=10, fill='x')
         self.set_graph_filter("Total")
+
+    def show_help_popup(self):
+        help_text = (
+            "Intel Actions:\n"
+            "- Secure Route (10 Intel): Reduces the chance of convoy ambush for the next day.\n"
+            "- Identify Weakness (25 Intel): Reduces casualties on your next successful offensive.\n"
+            "- Forecast Consumption (5 Intel): Removes random variance from tomorrow's supply needs, allowing perfect planning.\n\n"
+            "Convoy Types:\n"
+            "- Trucks: Small, flexible, always available. Good for frequent, modest resupply.\n"
+            "- Train: Large, delivers massive supplies in one trip, but has a cooldown after use. Using trains increases enemy disruption and ambush risk."
+        )
+        popup = tk.Toplevel(self)
+        popup.title("Game Help")
+        popup.geometry("540x340")
+        popup.resizable(False, False)
+        ttk.Label(popup, text="Game Help & Info", font=('Helvetica', 14, 'bold')).pack(pady=10)
+        text_widget = tk.Text(popup, wrap='word', font=('Courier', 11), height=16, width=60)
+        text_widget.pack(padx=10, pady=5)
+        text_widget.insert('1.0', help_text)
+        text_widget.config(state='disabled')
+        ttk.Button(popup, text="Close", command=popup.destroy).pack(pady=10)
 
     def set_stance(self, stance): self.game_logic.current_stance = stance; self.update_display()
     def set_graph_filter(self, category):
