@@ -4,9 +4,6 @@ from tkinter import ttk
 from tkinter import messagebox
 from game_logic import GameLogic
 from windows import DailySummaryWindow, DispatchWindow, ReinforcementWindow
-## ...existing code...
-
-## ...existing code...
 
 # --- MAIN GUI APPLICATION ---
 class LogisticsCommandGUI(tk.Tk):
@@ -111,14 +108,89 @@ class LogisticsCommandGUI(tk.Tk):
         else: messagebox.showwarning("Insufficient Intel", "You do not have enough Intel to authorize this action.")
 
     def end_day_click(self):
-        summary = self.game_logic.resolve_day(); summary_win = DailySummaryWindow(self, summary); self.wait_window(summary_win); self.update_display()
+        summary = self.game_logic.resolve_day()
+        summary_win = DailySummaryWindow(self, summary)
+        self.wait_window(summary_win)
+        self.update_display()
+        # Theme switching logic
+        if self.game_logic.current_stance == 'Offensive':
+            self.set_theme('offensive')
+        else:
+            self.set_theme('default')
         if self.game_logic.game_over:
             message = "VICTORY!\n\nYou have successfully broken the enemy lines!" if self.game_logic.victory else "DEFEAT.\n\nYour forces have been broken and the front has collapsed."
-            messagebox.showinfo("Game Over", message); self.destroy()
+            messagebox.showinfo("Game Over", message)
+            self.destroy()
         elif self.game_logic.reinforcement_timer <= 0:
             self.end_day_btn.config(state='disabled')
-            rein_win = ReinforcementWindow(self, self.game_logic); self.wait_window(rein_win)
-            self.end_day_btn.config(state='normal'); self.update_display()
+            rein_win = ReinforcementWindow(self, self.game_logic)
+            self.wait_window(rein_win)
+            self.end_day_btn.config(state='normal')
+            self.update_display()
+    def set_theme(self, theme):
+        # Default theme colors
+        default_bg = 'gray90'
+        default_canvas_bg = 'gray95'
+        default_btn_bg = 'gray90'
+        default_btn_fg = 'black'
+        default_end_btn_bg = 'darkgreen'
+        default_end_btn_fg = 'white'
+        offensive_bg = 'firebrick1'
+        offensive_canvas_bg = 'mistyrose'
+        offensive_btn_bg = 'yellow'
+        offensive_btn_fg = 'black'
+        if theme == 'offensive':
+            bg = offensive_bg
+            canvas_bg = offensive_canvas_bg
+            btn_bg = offensive_btn_bg
+            btn_fg = offensive_btn_fg
+            end_btn_bg = offensive_btn_bg
+            end_btn_fg = offensive_btn_fg
+        else:
+            bg = default_bg
+            canvas_bg = default_canvas_bg
+            btn_bg = default_btn_bg
+            btn_fg = default_btn_fg
+            end_btn_bg = default_end_btn_bg
+            end_btn_fg = default_end_btn_fg
+        # Update main frames and canvases
+        self.configure(bg=bg)
+        for child in self.winfo_children():
+            if isinstance(child, tk.Frame):
+                child.configure(bg=bg)
+            if isinstance(child, tk.Canvas):
+                child.configure(bg=canvas_bg)
+            if isinstance(child, tk.Button):
+                child.configure(bg=btn_bg, fg=btn_fg)
+                if child.cget('text') == 'END DAY':
+                    child.configure(bg=end_btn_bg, fg=end_btn_fg)
+            if isinstance(child, ttk.LabelFrame):
+                try:
+                    child.configure(style='Custom.TLabelframe')
+                except Exception:
+                    pass
+        # Update all widgets recursively
+        def update_children(widget):
+            for c in widget.winfo_children():
+                if isinstance(c, tk.Frame):
+                    c.configure(bg=bg)
+                if isinstance(c, tk.Canvas):
+                    c.configure(bg=canvas_bg)
+                if isinstance(c, tk.Button):
+                    c.configure(bg=btn_bg, fg=btn_fg)
+                    if c.cget('text') == 'END DAY':
+                        c.configure(bg=end_btn_bg, fg=end_btn_fg)
+                if isinstance(c, ttk.LabelFrame):
+                    try:
+                        c.configure(style='Custom.TLabelframe')
+                    except Exception:
+                        pass
+                update_children(c)
+        # Set ttk style for LabelFrame
+        style = ttk.Style()
+        style.configure('Custom.TLabelframe', background=bg)
+        style.configure('Custom.TLabelframe.Label', background=bg)
+        update_children(self)
 
     def open_dispatch_window(self, convoy_type): DispatchWindow(self, self.game_logic, convoy_type)
     def update_unit_dots(self):
