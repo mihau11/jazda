@@ -1,0 +1,16 @@
+project Tankette is
+
+   for Source_Dirs use ("src");
+   for Object_Dir use "obj";
+   for Exec_Dir use "bin";
+   for Main use ("main.adb");
+
+   package Compiler is
+      for Default_Switches ("Ada") use ("-gnat2012", "-gnatwa", "-O2");
+   end Compiler;
+
+   package Linker is
+      for Default_Switches ("Ada") use ("-lSDL2");
+   end Linker;
+
+end Tankette;
