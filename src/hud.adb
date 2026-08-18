@@ -11,6 +11,7 @@ package body Hud is
    Mask_Color      : constant Unsigned_32 := 16#FF000000#;
    Hull_Icon_Color : constant Unsigned_32 := 16#FF8FA06A#;
    Flash_Color     : constant Unsigned_32 := 16#FFFF3020#;
+   Muzzle_Color    : constant Unsigned_32 := 16#FFFFB020#;
 
    procedure Put (Fb : in out Framebuffer.Pixel_Array; X, Y : Integer; Color : Unsigned_32) is
    begin
@@ -55,11 +56,17 @@ package body Hud is
    begin
       case C is
          when 'A' => return ("010", "101", "111", "101", "101");
+         when 'B' => return ("110", "101", "110", "101", "110");
+         when 'C' => return ("111", "100", "100", "100", "111");
          when 'D' => return ("110", "101", "101", "101", "110");
          when 'E' => return ("111", "100", "110", "100", "111");
          when 'F' => return ("111", "100", "110", "100", "100");
          when 'G' => return ("111", "100", "101", "101", "111");
+         when 'H' => return ("101", "101", "111", "101", "101");
          when 'I' => return ("111", "010", "010", "010", "111");
+         when 'K' => return ("101", "101", "110", "101", "101");
+         when 'L' => return ("100", "100", "100", "100", "111");
+         when 'M' => return ("101", "111", "111", "111", "101");
          when 'N' => return ("101", "111", "111", "101", "101");
          when 'O' => return ("111", "101", "101", "101", "111");
          when 'P' => return ("111", "101", "111", "100", "100");
@@ -68,6 +75,8 @@ package body Hud is
          when 'S' => return ("111", "100", "111", "001", "111");
          when 'T' => return ("111", "010", "010", "010", "010");
          when 'U' => return ("101", "101", "101", "101", "111");
+         when 'V' => return ("101", "101", "101", "101", "010");
+         when 'W' => return ("101", "101", "111", "111", "101");
          when 'Y' => return ("101", "101", "010", "010", "010");
          when others => return Blank_Glyph;
       end case;
@@ -193,6 +202,112 @@ package body Hud is
       end loop;
    end Draw_Hit_Pips;
 
+   --  Three small pips per lever, laid out horizontally starting at
+   --  X_Start: the pip matching Position is filled, the other two are
+   --  outline-only. Same visual language as Draw_Hit_Pips, just smaller
+   --  and grouped by track instead of by hit count.
+   procedure Draw_Lever_Pips
+     (Fb       : in out Framebuffer.Pixel_Array;
+      X_Start  : Integer;
+      Position : Hull.Lever_Position)
+   is
+      Pip_Size : constant Integer := 5;
+      Gap      : constant Integer := 2;
+      Y0       : constant Integer := (Header_Height - Pip_Size) / 2;
+      Active   : constant Integer :=
+        (case Position is
+            when Hull.Drive      => 0,
+            when Hull.Declutched => 1,
+            when Hull.Brake      => 2);
+   begin
+      for I in 0 .. 2 loop
+         declare
+            X0     : constant Integer := X_Start + I * (Pip_Size + Gap);
+            Filled : constant Boolean := I = Active;
+         begin
+            for Y in Y0 .. Y0 + Pip_Size - 1 loop
+               for X in X0 .. X0 + Pip_Size - 1 loop
+                  if Filled then
+                     Put (Fb, X, Y, Reticle_Color);
+                  elsif Y = Y0 or else Y = Y0 + Pip_Size - 1
+                    or else X = X0 or else X = X0 + Pip_Size - 1
+                  then
+                     Put (Fb, X, Y, Hull_Icon_Color);
+                  end if;
+               end loop;
+            end loop;
+         end;
+      end loop;
+   end Draw_Lever_Pips;
+
+   --  A single lever's position as a vertical 3-stop icon: top stop =
+   --  Drive (pushed forward), middle = Declutched, bottom = Brake
+   --  (pulled all the way back) -- mirrors a real clutch-brake lever's
+   --  travel. The current stop is filled, the other two outline-only.
+   procedure Draw_Lever_Icon
+     (Fb       : in out Framebuffer.Pixel_Array;
+      X0, Y0   : Integer;
+      Position : Hull.Lever_Position)
+   is
+      Pip    : constant Integer := 4;
+      Gap    : constant Integer := 1;
+      Active : constant Integer :=
+        (case Position is
+            when Hull.Drive      => 0,
+            when Hull.Declutched => 1,
+            when Hull.Brake      => 2);
+   begin
+      for Stop in 0 .. 2 loop
+         declare
+            Y1     : constant Integer := Y0 + Stop * (Pip + Gap);
+            Filled : constant Boolean := Stop = Active;
+         begin
+            for Y in Y1 .. Y1 + Pip - 1 loop
+               for X in X0 .. X0 + Pip - 1 loop
+                  if Filled then
+                     Put (Fb, X, Y, Reticle_Color);
+                  elsif Y = Y1 or else Y = Y1 + Pip - 1
+                    or else X = X0 or else X = X0 + Pip - 1
+                  then
+                     Put (Fb, X, Y, Hull_Icon_Color);
+                  end if;
+               end loop;
+            end loop;
+         end;
+      end loop;
+   end Draw_Lever_Icon;
+
+   --  Bottom-right legend: a small lever icon per track next to a
+   --  three-line text key spelling out what each position means --
+   --  the header pips alone show current state, not what it stands for.
+   --  Positioned to clear Draw_Banner's reserved bottom band (see
+   --  Draw_Banner below) so the two never overlap.
+   procedure Draw_Lever_Legend
+     (Fb          : in out Framebuffer.Pixel_Array;
+      Left_Lever  : Hull.Lever_Position;
+      Right_Lever : Hull.Lever_Position)
+   is
+      Pip             : constant Integer := 4;
+      Icon_Gap        : constant Integer := 1;
+      Col_Gap         : constant Integer := 2;
+      Icon_Height     : constant Integer := 3 * Pip + 2 * Icon_Gap;
+      Text_Scale      : constant Integer := 1;
+      Line_Height     : constant Integer := 5 * Text_Scale + 1;
+      Text_Height     : constant Integer := 3 * Line_Height - 1;
+      Block_Height    : constant Integer := Integer'Max (Icon_Height, Text_Height);
+      Banner_Reserve  : constant Integer := 22;  --  clears Draw_Banner's bottom band
+      Text_X          : constant Integer := Framebuffer.Width - 34;
+      Icon_X          : constant Integer := Text_X - Col_Gap - 2 * Pip - Col_Gap;
+      Y0              : constant Integer :=
+        Framebuffer.Height - Banner_Reserve - Block_Height;
+   begin
+      Draw_Lever_Icon (Fb, Icon_X, Y0, Left_Lever);
+      Draw_Lever_Icon (Fb, Icon_X + Pip + Col_Gap, Y0, Right_Lever);
+      Draw_Text (Fb, Text_X, Y0,                   "D DRIVE",  Text_Scale, Digit_Color);
+      Draw_Text (Fb, Text_X, Y0 + Line_Height,     "C CLUTCH", Text_Scale, Digit_Color);
+      Draw_Text (Fb, Text_X, Y0 + 2 * Line_Height, "B BRAKE",  Text_Scale, Digit_Color);
+   end Draw_Lever_Legend;
+
    function Blend_Channel (P, Target : Integer; Intensity : Float) return Unsigned_32 is
       Result : Integer := Integer (Float (P) + Intensity * (Float (Target) - Float (P)));
    begin
@@ -204,14 +319,15 @@ package body Hud is
       return Unsigned_32 (Result);
    end Blend_Channel;
 
-   procedure Apply_Flash
+   procedure Apply_Color_Flash
      (Fb        : in out Framebuffer.Pixel_Array;
-      Intensity : Float)
+      Intensity : Float;
+      Color     : Unsigned_32)
    is
       Clamped : constant Float := Float'Max (0.0, Float'Min (1.0, Intensity));
-      Fr      : constant Integer := Integer (Shift_Right (Flash_Color, 16) and 16#FF#);
-      Fg      : constant Integer := Integer (Shift_Right (Flash_Color, 8) and 16#FF#);
-      Fbl     : constant Integer := Integer (Flash_Color and 16#FF#);
+      Fr      : constant Integer := Integer (Shift_Right (Color, 16) and 16#FF#);
+      Fg      : constant Integer := Integer (Shift_Right (Color, 8) and 16#FF#);
+      Fbl     : constant Integer := Integer (Color and 16#FF#);
    begin
       if Clamped <= 0.0 then
          return;
@@ -229,7 +345,23 @@ package body Hud is
             Fb (I) := 16#FF00_0000# or Shift_Left (Nr, 16) or Shift_Left (Ng, 8) or Nb;
          end;
       end loop;
+   end Apply_Color_Flash;
+
+   procedure Apply_Flash
+     (Fb        : in out Framebuffer.Pixel_Array;
+      Intensity : Float)
+   is
+   begin
+      Apply_Color_Flash (Fb, Intensity, Flash_Color);
    end Apply_Flash;
+
+   procedure Apply_Muzzle_Flash
+     (Fb        : in out Framebuffer.Pixel_Array;
+      Intensity : Float)
+   is
+   begin
+      Apply_Color_Flash (Fb, Intensity, Muzzle_Color);
+   end Apply_Muzzle_Flash;
 
    procedure Draw_Banner (Fb : in out Framebuffer.Pixel_Array; Text : String) is
       Scale   : constant Integer := 2;
@@ -257,7 +389,9 @@ package body Hud is
       Dir_Angle      : Float;
       Relative_Angle : Float;
       Hits_Taken     : Natural;
-      Mode           : View.Mode)
+      Mode           : View.Mode;
+      Left_Lever     : Hull.Lever_Position;
+      Right_Lever    : Hull.Lever_Position)
    is
       --  "North" is defined as +Y in world coordinates -- the same
       --  convention future radio-report bearings (milestone 8) will use.
@@ -330,7 +464,10 @@ package body Hud is
 
       Draw_Azimuth_Number (Fb, Integer (Azimuth_Deg));
       Draw_Hull_Icon (Fb, 46, Header_Height / 2, Relative_Angle);
+      Draw_Lever_Pips (Fb, 60, Left_Lever);
+      Draw_Lever_Pips (Fb, 90, Right_Lever);
       Draw_Hit_Pips (Fb, Hits_Taken);
+      Draw_Lever_Legend (Fb, Left_Lever, Right_Lever);
 
       --  Gun-sight reticle: a Mauser-style post -- a thin horizontal wire
       --  through center, plus a thick post rising from below into the

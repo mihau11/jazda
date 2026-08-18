@@ -13,15 +13,17 @@ A fictional "lately invented" one-man tankette, in the spirit of the Italian L3/
 
 ## Movement — no WSAD
 
-T-34-style differential steering: there is no direct "turn left/right" input. Turning is achieved by declutching (disengaging) one track from the engine, same as the real mechanism — the hull's linear/angular speed derive from combining the two tracks' speeds (a track's speed is the throttle speed unless declutched, then zero). This is a deliberate simulation-first choice over arcade-style tank controls.
+T-34-style clutch-brake steering: there is no direct "turn left/right" input. Each track has its own 3-position lever — **Drive** (coupled to the engine), **Declutched** (freewheels — no engine thrust, no clutch drag), **Brake** (actively hauled to a stop, regardless of throttle) — and the hull's linear/angular speed derive from combining the two tracks' resulting speeds. This is a deliberate simulation-first choice over arcade-style tank controls.
 
-- **Q** declutches the right track (hull curves right), **E** declutches the left (curves left).
-- **Space** throttles forward, **C** throttles reverse.
+- Each track carries a persistent speed rather than snapping to a target: under Drive the engine keeps adding a small constant push every frame the throttle is held, so the track just keeps accelerating -- there's no fixed top speed, only a small always-on rolling-friction drag (also felt under Declutched, and by the whole vehicle) that it climbs toward asymptotically, so long straightaways reward patience with a genuinely higher top end rather than hitting a governor; under Declutched the track holds steady bar that same friction (the clutch itself adds no resistance); under Brake it's hauled toward zero fast. This is what makes the combinations feel distinct rather than all reducing to the same "half speed": both Drive = normal driving, gradually building up speed; both Declutched = a slow coast to a stop; both Brake = a hard stop in place, even with the throttle held; one Drive + one Declutched = a turn that starts gentle and gradually tightens as the free track's speed bleeds off; one Drive + one Brake = an immediate, sharp pivot that bleeds speed fast.
+- Levers are sticky, absolute-position keys (like a real lever, they stay where you put them) — left track: **1**=Drive **2**=Declutched **3**=Brake; right track: **0**=Drive **9**=Declutched **8**=Brake (deliberately inverted from the left track's order). Both default to Drive.
+- **Space** throttles forward, **C** throttles reverse — the levers decide whether a track *follows* the throttle at all, not whether the tank moves.
 
 ## Graphics
 
 - Minimalistic 2.5D raycasting, Doom/Wolfenstein-style rendering.
 - Ada + an SDL2 binding for window/input/framebuffer; raycasting math implemented directly in Ada.
+- Walls, floor, ceiling, and entity sprites render as flat procedural colors by default, with no assets required. Optionally, the player can drop `.bmp` files into an `assets/` folder to texture-map any of these instead (see `assets/README.md`) -- a deliberate, opt-in exception to the "no external assets" rule elsewhere in this project (audio remains fully synthesized either way).
 
 ## HUD — deliberately minimal
 
@@ -43,7 +45,9 @@ T-34-style differential steering: there is no direct "turn left/right" input. Tu
 
 ## Missions
 
-- Each mission is a bounded map/area.
+- A main menu opens the game: **1** starts a normal Mission, **2** starts Test Drive, **3** starts Trolling -- Test Drive and Trolling both use the same map-building flow below but skip mission/contact spawning (no win/loss condition, just free driving/aiming practice); Trolling is deliberately undefined beyond that for now, a reserved slot for whatever odd one-off idea comes up next, so it doesn't have to get bolted onto Mission or Test Drive's already-settled behavior.
+- Before a mission starts, the player builds the map themselves: pick a size, then place terrain obstacles (wall/pillar/barrier) on a top-down grid. The remaining free interior space converts live into a 1-11 difficulty number — more open space is harder, since it gives contacts better sightlines and the player less cover.
+- Difficulty sets the mission's contact quota and how often contacts arrive: harder missions get more contacts, spawning more frequently. Contacts (infantry, rarer AT guns) are placed by the game at random free map cells over time, not by the player and not all at mission start — each spawn immediately fires a radio report per the spawn-detection system.
 - Radio reports accumulate over time, revealing contacts (infantry squads, AT guns) at specific azimuths as they're spotted.
 - The player chooses which contacts to engage, avoid, or scout — this is a contact list to resolve, not a linear corridor of scripted encounters.
-- **Open question**: exact win/loss conditions for a mission (e.g. all contacts resolved vs. time limit vs. reaching an extraction point) — not yet decided.
+- **Win/loss conditions**: loss on player destruction (unchanged); win once every contact in the mission's quota has spawned and been destroyed — the full contact list resolved. (Time-limit and extraction-point alternatives were considered but not chosen.)

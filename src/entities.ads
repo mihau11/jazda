@@ -11,19 +11,25 @@ package Entities is
       Reported  : Boolean := False;  --  has its spawn radio report already been generated
    end record;
 
-   Max_Entities : constant := 8;
+   Max_Entities : constant := 11;  --  matches the mission's max difficulty (1 .. 11)
    type Entity_Array is array (1 .. Max_Entities) of Entity;
 
-   --  A small fixed test placement in the milestone-2 room: two infantry
-   --  contacts and one AT gun, at open (non-wall) grid cells.
-   List : Entity_Array :=
-     (1      => (Kind => Infantry, X => 9.5, Y => 1.5, Alive => True,
-                 Timer => 0.0, Locked_On => False, Reported => False),
-      2      => (Kind => Infantry, X => 3.5, Y => 8.5, Alive => True,
-                 Timer => 0.0, Locked_On => False, Reported => False),
-      3      => (Kind => AT_Gun,   X => 9.5, Y => 8.5, Alive => True,
-                 Timer => 0.0, Locked_On => False, Reported => False),
-      others => (Kind => Infantry, X => 0.0, Y => 0.0, Alive => False,
+   --  Fixed buffer, runtime-populated by Mission's spawn timer (milestone
+   --  9) rather than a compile-time test placement. Slots 1 .. Count are
+   --  the ones spawned so far this mission; the rest are unused defaults.
+   List  : Entity_Array :=
+     (others => (Kind => Infantry, X => 0.0, Y => 0.0, Alive => False,
                  Timer => 0.0, Locked_On => False, Reported => False));
+   Count : Natural := 0;
+
+   procedure Reset;
+   --  Clears List back to all-dead defaults and zeroes Count. Called once
+   --  at the start of each mission.
+
+   procedure Spawn (Kind : Entities.Kind; X, Y : Float);
+   --  Appends a new alive entity at List (Count + 1), if Count < Max_Entities.
+
+   function Any_Alive return Boolean;
+   --  True if any entity in List is currently alive.
 
 end Entities;
