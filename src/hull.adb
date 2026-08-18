@@ -3,9 +3,17 @@ with World_Map; use World_Map;
 
 package body Hull is
 
-   Engine_Speed : constant Float := 0.04;  --  world units/frame, one track driven
-   Track_Base   : constant Float := 1.6;   --  differential-steering divisor
-   Clearance    : constant Float := 0.25;  --  collision radius around hull center
+   Accel_Increment  : constant Float := 0.0009;  --  world units/frame^2: constant engine thrust while Drive+throttled
+   Reverse_Accel_Increment : constant Float := 0.0003;  --  much weaker thrust in reverse
+   Track_Base       : constant Float := 1.6;     --  differential-steering divisor
+   Clearance        : constant Float := 0.25;    --  collision radius around hull center
+   Brake_Rate       : constant Float := 0.35;    --  per-frame fraction: Brake hauls a track toward zero
+   Rolling_Friction : constant Float := 0.02;    --  per-frame speed loss, always on (ground/mechanical drag)
+   --  No top-speed constant: Drive just keeps adding Accel_Increment every
+   --  frame the throttle is held, so speed climbs for as long as you hold
+   --  it -- the only thing opposing it is Rolling_Friction, which settles
+   --  at a natural equilibrium (Accel_Increment * (1 - Rolling_Friction)
+   --  / Rolling_Friction) rather than an artificial hard cap.
 
    function Solid (X, Y : Float) return Boolean is
    begin
@@ -21,26 +29,47 @@ package body Hull is
         or else Solid (X + Clearance, Y + Clearance);
    end Blocked_Near;
 
-   procedure Update
-     (H                : in out State;
-      Throttle         : Throttle_State;
-      Left_Declutched  : Boolean;
-      Right_Declutched : Boolean)
+   --  One track's next persistent speed, given its lever and the current
+   --  throttle-derived thrust. Drive keeps adding Thrust every frame (no
+   --  eased approach to a capped target); Declutched holds steady (no
+   --  clutch drag of its own); Brake eases toward zero, fast.
+   --  Rolling_Friction then applies to all three cases alike.
+   function Track_Speed
+     (Lever  : Lever_Position;
+      Speed  : Float;
+      Thrust : Float) return Float
    is
-      Base_Speed : constant Float :=
+      Eased : Float;
+   begin
+      case Lever is
+         when Drive      => Eased := Speed + Thrust;
+         when Declutched => Eased := Speed;
+         when Brake      => Eased := Speed + (0.0 - Speed) * Brake_Rate;
+      end case;
+      return Eased * (1.0 - Rolling_Friction);
+   end Track_Speed;
+
+   procedure Update
+     (H           : in out State;
+      Throttle    : Throttle_State;
+      Left_Lever  : Lever_Position;
+      Right_Lever : Lever_Position)
+   is
+      Thrust : constant Float :=
         (case Throttle is
             when Idle    => 0.0,
-            when Forward => Engine_Speed,
-            when Back => -Engine_Speed);
+            when Forward => Accel_Increment,
+            when Back => -Reverse_Accel_Increment);
 
-      Left_Speed  : constant Float := (if Left_Declutched then 0.0 else Base_Speed);
-      Right_Speed : constant Float := (if Right_Declutched then 0.0 else Base_Speed);
-
-      Linear_Speed  : constant Float := (Left_Speed + Right_Speed) / 2.0;
-      Angular_Speed : constant Float := (Right_Speed - Left_Speed) / Track_Base;
-
-      New_X, New_Y : Float;
+      Linear_Speed, Angular_Speed : Float;
+      New_X, New_Y                : Float;
    begin
+      H.Left_Speed  := Track_Speed (Left_Lever, H.Left_Speed, Thrust);
+      H.Right_Speed := Track_Speed (Right_Lever, H.Right_Speed, Thrust);
+
+      Linear_Speed  := (H.Left_Speed + H.Right_Speed) / 2.0;
+      Angular_Speed := (H.Left_Speed - H.Right_Speed) / Track_Base;
+
       H.Angle := H.Angle + Angular_Speed;
 
       New_X := H.X + Linear_Speed * Cos (H.Angle);
