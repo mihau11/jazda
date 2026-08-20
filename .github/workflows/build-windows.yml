@@ -33,11 +33,11 @@ jobs:
           # create a disposable one just to get the selected toolchain on
           # PATH for this command (the toolchain itself is chosen globally
           # by the setup-alire step, not scoped to this scratch crate).
-          alr -n -q init --bin _toolchain_shim
-          Set-Location _toolchain_shim
+          alr -n -q init --bin toolchain_shim
+          Set-Location toolchain_shim
           alr exec -- gprbuild -p -P "$env:GITHUB_WORKSPACE\tankette.gpr"
           Set-Location $env:GITHUB_WORKSPACE
-          Remove-Item -Recurse -Force _toolchain_shim
+          Remove-Item -Recurse -Force toolchain_shim
 
       - name: Package
         shell: pwsh
