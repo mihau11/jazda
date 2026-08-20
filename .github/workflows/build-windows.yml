@@ -28,7 +28,16 @@ jobs:
         shell: pwsh
         env:
           LIBRARY_PATH: ${{ github.workspace }}\sdl2\SDL2-${{ env.SDL2_VERSION }}\x86_64-w64-mingw32\lib
-        run: alr exec -- gprbuild -p -P tankette.gpr
+        run: |
+          # `alr exec` only works from inside an Alire crate directory, so
+          # create a disposable one just to get the selected toolchain on
+          # PATH for this command (the toolchain itself is chosen globally
+          # by the setup-alire step, not scoped to this scratch crate).
+          alr -n -q init --bin _toolchain_shim
+          Set-Location _toolchain_shim
+          alr exec -- gprbuild -p -P "$env:GITHUB_WORKSPACE\tankette.gpr"
+          Set-Location $env:GITHUB_WORKSPACE
+          Remove-Item -Recurse -Force _toolchain_shim
 
       - name: Package
         shell: pwsh
