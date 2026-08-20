@@ -1,0 +1,46 @@
+name: Build Windows exe
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  SDL2_VERSION: 2.32.4
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Alire + native GNAT/gprbuild toolchain
+        uses: alire-project/setup-alire@v6.0.0
+
+      - name: Download SDL2 (mingw devel package)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/libsdl-org/SDL/releases/download/release-$env:SDL2_VERSION/SDL2-devel-$env:SDL2_VERSION-mingw.zip" -OutFile sdl2.zip
+          Expand-Archive -Path sdl2.zip -DestinationPath sdl2
+
+      - name: Build
+        shell: pwsh
+        env:
+          LIBRARY_PATH: ${{ github.workspace }}\sdl2\SDL2-${{ env.SDL2_VERSION }}\x86_64-w64-mingw32\lib
+        run: alr exec -- gprbuild -p -P tankette.gpr
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist\Tankette | Out-Null
+          Copy-Item bin\main.exe dist\Tankette\Tankette.exe
+          Copy-Item "sdl2\SDL2-$env:SDL2_VERSION\x86_64-w64-mingw32\bin\SDL2.dll" dist\Tankette\SDL2.dll
+          Copy-Item -Recurse assets dist\Tankette\assets
+          Compress-Archive -Path dist\Tankette\* -DestinationPath dist\Tankette-windows.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tankette-windows
+          path: dist/Tankette-windows.zip
