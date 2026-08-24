@@ -46,7 +46,8 @@ public class Game1 : Game
         Mouse.SetPosition(_windowCenterX, _windowCenterY);
 
         _chunk = new Chunk();
-        TerrainGenerator.Generate(_chunk, seed: 1337);
+        var heights = TerrainGenerator.Generate(_chunk, seed: 1337);
+        StructureGenerator.Generate(_chunk, heights, seed: 1337);
 
         // Spawn near the center of the world, above the terrain (which only reaches
         // roughly y=3..10 — Chunk.Height=11 is just the max build limit).
@@ -114,7 +115,7 @@ public class Game1 : Game
 
         if (IsActive)
         {
-            _camera.Update(gameTime, kb, _windowCenterX, _windowCenterY);
+            _camera.Update(gameTime, kb, _chunk, _windowCenterX, _windowCenterY);
             HandleBlockSelection(kb);
             HandlePlaceAndBreak();
         }
@@ -133,6 +134,12 @@ public class Game1 : Game
         if (kb.IsKeyDown(Keys.D3) && !_prevKeyboard.IsKeyDown(Keys.D3)) _selectedBlock = BlockType.Stone;
         if (kb.IsKeyDown(Keys.D4) && !_prevKeyboard.IsKeyDown(Keys.D4)) _selectedBlock = BlockType.Wood;
         if (kb.IsKeyDown(Keys.D5) && !_prevKeyboard.IsKeyDown(Keys.D5)) _selectedBlock = BlockType.Leaves;
+        if (kb.IsKeyDown(Keys.D6) && !_prevKeyboard.IsKeyDown(Keys.D6)) _selectedBlock = BlockType.Sandbags;
+        if (kb.IsKeyDown(Keys.D7) && !_prevKeyboard.IsKeyDown(Keys.D7)) _selectedBlock = BlockType.Brick;
+        if (kb.IsKeyDown(Keys.D8) && !_prevKeyboard.IsKeyDown(Keys.D8)) _selectedBlock = BlockType.Snow;
+        if (kb.IsKeyDown(Keys.D9) && !_prevKeyboard.IsKeyDown(Keys.D9)) _selectedBlock = BlockType.BarbedWire;
+        if (kb.IsKeyDown(Keys.D0) && !_prevKeyboard.IsKeyDown(Keys.D0)) _selectedBlock = BlockType.ScorchedGround;
+        if (kb.IsKeyDown(Keys.OemMinus) && !_prevKeyboard.IsKeyDown(Keys.OemMinus)) _selectedBlock = BlockType.Metal;
     }
 
     private void HandlePlaceAndBreak()

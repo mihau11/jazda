@@ -6,120 +6,121 @@ namespace Trojkat;
 public struct RaycastHit
 {
     public bool Found;
-    public int X, Y, Z;
-    public int NormalX, NormalY, NormalZ;
-    public int Col;
+    public int Col, Y, Z;
+    public int PlacementCol, PlacementY, PlacementZ;
 }
 
-// Amanatides-Woo grid DDA: walks the integer cube lattice cell by cell along the ray,
-// stopping at the first cell with either triangle solid. The lattice is axis-aligned only
-// in grid-INDEX space (world space is sheared — see TriangleGrid), so the ray is transformed
-// into index space first; since that transform is linear, a unit-length world direction still
-// makes the DDA's "traveled" parameter equal true world-space distance; see TriangleGrid.
-// Once a cell is hit, the exact XZ entry point (in index space) picks out which of the two
-// triangles was actually struck.
+// Walks the triangulated grid one triangle (or Y layer) at a time along the ray, rather
+// than DDA-stepping whole cube columns and guessing which triangle got hit afterwards —
+// the walker always knows exactly which triangle it occupies, either from the unconditional
+// geometric split at the ray's start or from the edge it just crossed into, so there's no
+// "which triangle did I actually hit" ambiguity to get wrong.
+//
+// The lattice is axis-aligned only in grid-INDEX space (world space is sheared — see
+// TriangleGrid), so the ray is transformed into index space first; since that transform is
+// linear, a unit-length world direction still makes the walk's "traveled" parameter equal
+// true world-space distance; see TriangleGrid.
 public static class Raycaster
 {
+    private const float TEpsilon = 1e-4f;
+    private const float SEpsilon = 1e-4f;
+    private const float DetEpsilon = 1e-6f;
+    private const int MaxIterations = 8192;
+
     public static RaycastHit Cast(Chunk chunk, Vector3 worldOrigin, Vector3 worldDirection, float maxDistance)
     {
         worldDirection = Vector3.Normalize(worldDirection);
 
-        Vector2 indexOriginXZ = TriangleGrid.WorldToIndex(worldOrigin.X, worldOrigin.Z);
-        Vector2 indexDirXZ = TriangleGrid.WorldToIndex(worldDirection.X, worldDirection.Z);
-        Vector3 origin = new(indexOriginXZ.X, worldOrigin.Y, indexOriginXZ.Y);
-        Vector3 direction = new(indexDirXZ.X, worldDirection.Y, indexDirXZ.Y);
+        Vector2 O = TriangleGrid.WorldToIndex(worldOrigin.X, worldOrigin.Z);
+        Vector2 D = TriangleGrid.WorldToIndex(worldDirection.X, worldDirection.Z);
+        float originY = worldOrigin.Y;
+        float dirY = worldDirection.Y;
 
-        int x = (int)MathF.Floor(origin.X);
-        int y = (int)MathF.Floor(origin.Y);
-        int z = (int)MathF.Floor(origin.Z);
+        // Starting triangle: the same lx+lz<=1 split TriangleGrid.Corners encodes, computed
+        // unconditionally from geometry alone - never a guess based on what's solid.
+        int cellX = (int)MathF.Floor(O.X);
+        int row = (int)MathF.Floor(O.Y);
+        int y = (int)MathF.Floor(originY);
+        float lx = O.X - cellX;
+        float lz = O.Y - row;
+        int col = 2 * cellX + (lx + lz <= 1f ? 0 : 1);
 
-        int stepX = Math.Sign(direction.X);
-        int stepY = Math.Sign(direction.Y);
-        int stepZ = Math.Sign(direction.Z);
+        int stepY = Math.Sign(dirY);
+        float tDeltaY = dirY != 0 ? MathF.Abs(1f / dirY) : float.PositiveInfinity;
+        float tMaxY = NextBoundary(originY, y, stepY, dirY);
 
-        float tDeltaX = direction.X != 0 ? MathF.Abs(1f / direction.X) : float.PositiveInfinity;
-        float tDeltaY = direction.Y != 0 ? MathF.Abs(1f / direction.Y) : float.PositiveInfinity;
-        float tDeltaZ = direction.Z != 0 ? MathF.Abs(1f / direction.Z) : float.PositiveInfinity;
-
-        float tMaxX = NextBoundary(origin.X, x, stepX, direction.X);
-        float tMaxY = NextBoundary(origin.Y, y, stepY, direction.Y);
-        float tMaxZ = NextBoundary(origin.Z, z, stepZ, direction.Z);
-
-        int normalX = 0, normalY = 0, normalZ = 0;
+        int prevCol = col, prevY = y, prevRow = row;
         float traveled = 0f;
 
-        while (traveled <= maxDistance)
+        for (int iteration = 0; iteration < MaxIterations && traveled <= maxDistance; iteration++)
         {
-            if (!chunk.IsCellEmpty(x, y, z))
+            if (chunk.Get(col, y, row) != 0)
             {
-                Vector3 entry = origin + direction * traveled;
-                int col = HitTriangleCol(chunk, x, y, z, entry.X - x, entry.Z - z);
-
                 return new RaycastHit
                 {
                     Found = true,
-                    X = x, Y = y, Z = z,
-                    NormalX = normalX, NormalY = normalY, NormalZ = normalZ,
-                    Col = col,
+                    Col = col, Y = y, Z = row,
+                    PlacementCol = prevCol, PlacementY = prevY, PlacementZ = prevRow,
                 };
             }
 
-            if (tMaxX < tMaxY && tMaxX < tMaxZ)
+            prevCol = col; prevY = y; prevRow = row;
+
+            float bestT = tMaxY;
+            bool bestIsEdge = false;
+            TriangleEdge bestEdge = default;
+
+            foreach (var edge in TriangleGrid.Edges(col, row))
             {
-                x += stepX;
-                traveled = tMaxX;
-                tMaxX += tDeltaX;
-                normalX = -stepX; normalY = 0; normalZ = 0;
+                if (TryIntersect(O, D, edge, traveled, out float t) && t < bestT)
+                {
+                    bestT = t;
+                    bestIsEdge = true;
+                    bestEdge = edge;
+                }
             }
-            else if (tMaxY < tMaxZ)
+
+            traveled = bestT;
+
+            if (bestIsEdge)
             {
-                y += stepY;
-                traveled = tMaxY;
-                tMaxY += tDeltaY;
-                normalX = 0; normalY = -stepY; normalZ = 0;
+                col = bestEdge.NeighborCol;
+                row = bestEdge.NeighborRow;
             }
             else
             {
-                z += stepZ;
-                traveled = tMaxZ;
-                tMaxZ += tDeltaZ;
-                normalX = 0; normalY = 0; normalZ = -stepZ;
+                y += stepY;
+                tMaxY += tDeltaY;
             }
         }
 
         return new RaycastHit { Found = false };
     }
 
-    // Given the fractional entry point (lx, lz in [0,1]) within a cell, figure out which
-    // triangle that point falls in; fall back to whichever one is actually solid if the
-    // point lands in the empty one (the DDA is cube-level, so this is approximate).
-    private static int HitTriangleCol(Chunk chunk, int x, int y, int z, float lx, float lz)
+    // 2D ray-vs-segment intersection in index space: solve O + t*D = A + s*(B-A) for (t, s)
+    // via the standard cross-product formulation. Valid only strictly ahead of where we
+    // already are (t > traveled) and within the segment's span (s in [0,1]).
+    private static bool TryIntersect(Vector2 O, Vector2 D, TriangleEdge edge, float traveled, out float t)
     {
-        int o = lx + lz <= 1f ? 0 : 1;
-        int geometric = 2 * x + o;
-
-        if (chunk.Get(geometric, y, z) != 0) return geometric;
-
-        int other = 2 * x + (1 - o);
-        return chunk.Get(other, y, z) != 0 ? other : geometric;
-    }
-
-    // Which triangle a placed block should land in, given the hit face's cube-normal:
-    // straight up/down keeps the same triangle at the adjacent Y layer; an X/Z face
-    // (an "outer" edge of the hit triangle) reuses TriangleGrid's own edge table so this
-    // doesn't re-derive the adjacency the mesher already knows.
-    public static (int Col, int Y, int Row) GetPlacementTarget(RaycastHit hit)
-    {
-        if (hit.NormalY != 0) return (hit.Col, hit.Y + hit.NormalY, hit.Z);
-
-        foreach (var edge in TriangleGrid.Edges(hit.Col, hit.Z))
+        Vector2 e = edge.B - edge.A;
+        float det = Cross(e, D);
+        if (MathF.Abs(det) < DetEpsilon)
         {
-            if ((edge.NormalDx, edge.NormalDz) == (hit.NormalX, hit.NormalZ) && (edge.NormalDx != 0 || edge.NormalDz != 0))
-                return (edge.NeighborCol, hit.Y, edge.NeighborRow);
+            t = 0f;
+            return false;
         }
 
-        return (hit.Col, hit.Y, hit.Z);
+        Vector2 ao = edge.A - O;
+        t = Cross(e, ao) / det;
+        float s = Cross(D, ao) / det;
+
+        return t > traveled + TEpsilon && s >= -SEpsilon && s <= 1f + SEpsilon;
     }
+
+    private static float Cross(Vector2 a, Vector2 b) => a.X * b.Y - a.Y * b.X;
+
+    public static (int Col, int Y, int Row) GetPlacementTarget(RaycastHit hit) =>
+        (hit.PlacementCol, hit.PlacementY, hit.PlacementZ);
 
     private static float NextBoundary(float originComponent, int cell, int step, float dirComponent)
     {

@@ -7,12 +7,13 @@ public enum FaceKind
     Side,
 }
 
-// Looks up UV sub-rects in the 3x2 texture atlas
-// (tile 0=grass-top, 1=grass-side, 2=dirt, 3=stone, 4=wood, 5=leaves).
+// Looks up UV sub-rects in the 4x3 texture atlas
+// (tile 0=grass-top, 1=grass-side, 2=dirt, 3=stone, 4=wood, 5=leaves,
+// 6=sandbags, 7=brick, 8=snow, 9=barbed wire, 10=scorched ground, 11=metal).
 public static class AtlasUV
 {
-    private const int Cols = 3;
-    private const int Rows = 2;
+    private const int Cols = 4;
+    private const int Rows = 3;
 
     private static int TileIndex(BlockType type, FaceKind face)
     {
@@ -32,6 +33,12 @@ public static class AtlasUV
             BlockType.Stone => 3,
             BlockType.Wood => 4,
             BlockType.Leaves => 5,
+            BlockType.Sandbags => 6,
+            BlockType.Brick => 7,
+            BlockType.Snow => 8,
+            BlockType.BarbedWire => 9,
+            BlockType.ScorchedGround => 10,
+            BlockType.Metal => 11,
             _ => 3,
         };
     }

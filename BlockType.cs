@@ -8,4 +8,10 @@ public enum BlockType : byte
     Stone = 3,
     Wood = 4,
     Leaves = 5,
+    Sandbags = 6,
+    Brick = 7,
+    Snow = 8,
+    BarbedWire = 9,
+    ScorchedGround = 10,
+    Metal = 11,
 }

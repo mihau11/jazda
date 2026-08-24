@@ -23,11 +23,6 @@ public class Chunk
         IsDirty = true;
     }
 
-    // Convenience for the raycaster's cube-column DDA: true only when both triangles
-    // occupying that (x, z) footprint are empty.
-    public bool IsCellEmpty(int x, int y, int z) =>
-        Get(2 * x, y, z) == 0 && Get(2 * x + 1, y, z) == 0;
-
     public static bool InBounds(int col, int y, int row) =>
         col >= 0 && col < TriWidth && y >= 0 && y < Height && row >= 0 && row < Depth;
 }

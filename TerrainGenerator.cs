@@ -4,7 +4,7 @@ namespace Trojkat;
 
 public static class TerrainGenerator
 {
-    public static void Generate(Chunk chunk, int seed)
+    public static int[,] Generate(Chunk chunk, int seed)
     {
         var heightNoise = new SimpleNoise(seed);
         var halfNoise = new SimpleNoise(seed + 9973);
@@ -14,8 +14,8 @@ public static class TerrainGenerator
         for (int x = 0; x < Chunk.Width; x++)
         for (int z = 0; z < Chunk.Depth; z++)
         {
-            float n = heightNoise.Noise2D(x * 0.12f, z * 0.12f);
-            int height = 8 + (int)MathF.Round(n * 5f);
+            float n = heightNoise.Noise2D(x * 0.06f, z * 0.06f);
+            int height = 6 + (int)MathF.Round(n * 1.5f);
             height = Math.Clamp(height, 1, Chunk.Height - 1);
             heights[x, z] = height;
 
@@ -33,6 +33,8 @@ public static class TerrainGenerator
             if (aSolid) chunk.Set(2 * x, height, z, (byte)BlockType.Grass);
             if (bSolid) chunk.Set(2 * x + 1, height, z, (byte)BlockType.Grass);
         }
+
+        return heights;
     }
 
     private static void SetBoth(Chunk chunk, int x, int y, int z, byte value)
