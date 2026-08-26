@@ -64,23 +64,49 @@ const int WarnAtSubdivisionLevel = 7;    // levels at or above this will likely 
 // have block geometry built and resident on the GPU at any time.
 const int BaseFaceCount = 20;
 
-// Assets/Textures/atlas.png is 3 square tiles laid out left to right:
-// grass top, dirt side, bare ground - these are the u-offset (in atlas
+// Assets/Textures/atlas.png is 6 square tiles laid out left to right:
+// grass, dirt, stone, sand, snow, gravel - these are the u-offset (in atlas
 // fractions) of each tile's left edge.
-const float AtlasTileWidth = 1f / 3f;
-const float AtlasTileTop = 0f * AtlasTileWidth;
-const float AtlasTileSide = 1f * AtlasTileWidth;
-const float AtlasTileBare = 2f * AtlasTileWidth;
+const int AtlasTileCount = 6;
+const float AtlasTileWidth = 1f / AtlasTileCount;
+const float AtlasTileGrass = 0f * AtlasTileWidth;
+const float AtlasTileDirt = 1f * AtlasTileWidth;
+const float AtlasTileStone = 2f * AtlasTileWidth;
+const float AtlasTileSand = 3f * AtlasTileWidth;
+const float AtlasTileSnow = 4f * AtlasTileWidth;
+const float AtlasTileGravel = 5f * AtlasTileWidth;
+const float AtlasTileBare = AtlasTileStone; // fallback tile for a broken-down bare-ground column
 
-// A block prism has 9 unique corners - 3 floor, plus the roof duplicated
-// (3 for the top cap, 3 for the wall tops) so the cap and the walls can each
-// carry their own vertex color - but is still used by only 7 triangles (top
-// + 3 side walls x 2), so indexed geometry still cuts vertex data (and the
-// work to build it) well below emitting each triangle's 3 corners
-// separately. raylib's Mesh.Indices is 16-bit, so a single Mesh can only
-// address up to 65535 vertices - that caps how many blocks fit in one Mesh
-// chunk.
-const int VerticesPerBlock = 9;
+// Each column is "randomly painted" with one of these materials (top tile,
+// side tile) - a deterministic hash of its position picks the material, so
+// the patchwork look is stable across rebuilds instead of flickering every
+// time a chunk regenerates. Grass/snow keep a distinct, darker side tile
+// (dirt/stone showing through underneath); the rest are uniform on all faces.
+static (float Top, float Side)[] BuildMaterials() =>
+[
+    (AtlasTileGrass, AtlasTileDirt),
+    (AtlasTileDirt, AtlasTileDirt),
+    (AtlasTileStone, AtlasTileStone),
+    (AtlasTileSand, AtlasTileSand),
+    (AtlasTileSnow, AtlasTileStone),
+    (AtlasTileGravel, AtlasTileGravel),
+];
+
+// A block prism has 12 unique corners - 3 floor, the roof duplicated (3 for
+// the top cap, 3 for the wall tops), and the floor duplicated again (3 for
+// the bottom cap) - so the cap, the walls, and the bottom cap can each carry
+// their own vertex normal/color, but is still used by only 8 triangles (top
+// + bottom + 3 side walls x 2), so indexed geometry still cuts vertex data
+// (and the work to build it) well below emitting each triangle's 3 corners
+// separately. The bottom cap needs its own copy of the floor corners (not
+// the same 3 floor vertices the walls use) because it faces the opposite way
+// (straight down) from the walls meeting it at that corner - sharing
+// vertices there would force one shared normal on two differently-facing
+// surfaces, lighting whichever one got the wrong normal as if it faced the
+// sun instead of away from it. raylib's Mesh.Indices is 16-bit, so a single
+// Mesh can only address up to 65535 vertices - that caps how many blocks fit
+// in one Mesh chunk.
+const int VerticesPerBlock = 12;
 const int TrianglesPerBlockWallsOnly = 6;  // 3 side walls x 2 triangles each - top/bottom caps
                                             // are added on top of this per-instance when exposed
 const int MaxVerticesPerMesh = 65535; // raylib Mesh.Indices is ushort
@@ -135,6 +161,14 @@ var (latticeCells, cellIndexLookup) = BuildLatticeCells(blocksPerEdge);
 // floating layer with nothing under it.
 HashSet<(int TriIdx, int CellIdx, int Layer)> brokenLayers = new();
 
+// Layers a player has built, keyed the same way as brokenLayers but with
+// inverted meaning: presence means *present*, not missing. Every column
+// starts fully solid up to layersPerColumn (see standingSurfaceHeight
+// below), so there's nothing to place into there - placement only applies
+// to the headroom layers [layersPerColumn, MaxLayersPerColumn), which start
+// empty and are filled in one at a time by right-click.
+HashSet<(int TriIdx, int CellIdx, int Layer)> placedLayers = new();
+
 // How far ahead (in world units) the crosshair can reach to break a block -
 // a couple of blocks' worth, scaled to whatever face/grid size was chosen.
 float faceEdgeLength = Vector3.Distance(vertices[faces[0].VA], vertices[faces[0].VB]);
@@ -147,11 +181,84 @@ unsafe { wireMaterial.Maps[0].Color = new Color(0, 0, 0, 60); }
 // Simple texture pack: a 3-tile atlas (grass top / dirt side / bare stone),
 // see Assets/Textures/atlas.png. Vertices are written with UVs already
 // scoped to their tile (see AtlasTileU in BuildChunkMeshData), so one
-// texture and one draw call still covers every block; raylib's default
-// shader multiplies the sampled texel by each vertex's color, so the
-// existing per-column hue tint keeps working on top of the texture.
+// texture and one draw call still covers every block; per-vertex color is
+// flat white now (see BuildChunkMeshData) since real shading comes from the
+// lighting shader below.
 Texture2D blockAtlas = Raylib.LoadTexture("Assets/Textures/atlas.png");
 unsafe { fillMaterial.Maps[(int)MaterialMapIndex.Albedo].Texture = blockAtlas; }
+
+// A single fixed directional sun - no day/night cycle. Terrain shading
+// (fillMaterial only; wireMaterial stays on raylib's default shader, which
+// never reads vertexNormal, so the wireframe overlay is unaffected) comes
+// from lighting.frag combining this direction/color with an ambient floor
+// so the planet's far hemisphere is dim but not pure black. The same
+// direction is reused below to place the visible sun sphere every frame.
+Vector3 sunDirection = Vector3.Normalize(new Vector3(0.5f, 0.8f, 0.3f));
+Vector3 sunColorVec = new Vector3(1f, 0.96f, 0.88f);
+Vector3 ambientColorVec = new Vector3(0.30f, 0.30f, 0.33f);
+
+Shader lightingShader = Raylib.LoadShader("Assets/Shaders/lighting.vert", "Assets/Shaders/lighting.frag");
+fillMaterial.Shader = lightingShader;
+Raylib.SetShaderValue(lightingShader, Raylib.GetShaderLocation(lightingShader, "sunDirection"), sunDirection, ShaderUniformDataType.Vec3);
+Raylib.SetShaderValue(lightingShader, Raylib.GetShaderLocation(lightingShader, "sunColor"), sunColorVec, ShaderUniformDataType.Vec3);
+Raylib.SetShaderValue(lightingShader, Raylib.GetShaderLocation(lightingShader, "ambientColor"), ambientColorVec, ShaderUniformDataType.Vec3);
+
+// Shadow map: a depth-only render of the loaded chunks from the sun's point
+// of view, sampled back in lighting.frag so a block only gets the sun's
+// diffuse term when nothing else (a wall, a roof) sits between it and the
+// sun - without this, per-face lighting alone can't tell a cave interior
+// from open ground; both wall orientations look "lit" purely from their own
+// normal versus sunDirection, regardless of what's blocking the light.
+const int ShadowMapSize = 2048;
+uint shadowFboId = Rlgl.LoadFramebuffer();
+Rlgl.EnableFramebuffer(shadowFboId);
+uint shadowDepthTexId = Rlgl.LoadTextureDepth(ShadowMapSize, ShadowMapSize, false);
+Rlgl.FramebufferAttach(shadowFboId, shadowDepthTexId, FramebufferAttachType.Depth, FramebufferAttachTextureType.Texture2D, 0);
+Rlgl.DisableFramebuffer();
+RenderTexture2D shadowMap = new()
+{
+    Id = shadowFboId,
+    Texture = new Texture2D { Width = ShadowMapSize, Height = ShadowMapSize, Mipmaps = 1, Format = PixelFormat.UncompressedR32 },
+    Depth = new Texture2D { Id = shadowDepthTexId, Width = ShadowMapSize, Height = ShadowMapSize, Mipmaps = 1, Format = PixelFormat.UncompressedR32 },
+};
+
+// Second, lower-resolution cascade with a much larger fixed coverage so
+// terrain beyond the tight near cascade's player-centered radius still
+// gets shadowed instead of just always reading as lit - see ShadowFactor's
+// near-then-far fallback in lighting.frag.
+const int ShadowMapFarSize = 1024;
+uint shadowFarFboId = Rlgl.LoadFramebuffer();
+Rlgl.EnableFramebuffer(shadowFarFboId);
+uint shadowFarDepthTexId = Rlgl.LoadTextureDepth(ShadowMapFarSize, ShadowMapFarSize, false);
+Rlgl.FramebufferAttach(shadowFarFboId, shadowFarDepthTexId, FramebufferAttachType.Depth, FramebufferAttachTextureType.Texture2D, 0);
+Rlgl.DisableFramebuffer();
+RenderTexture2D shadowMapFar = new()
+{
+    Id = shadowFarFboId,
+    Texture = new Texture2D { Width = ShadowMapFarSize, Height = ShadowMapFarSize, Mipmaps = 1, Format = PixelFormat.UncompressedR32 },
+    Depth = new Texture2D { Id = shadowFarDepthTexId, Width = ShadowMapFarSize, Height = ShadowMapFarSize, Mipmaps = 1, Format = PixelFormat.UncompressedR32 },
+};
+
+Shader shadowDepthShader = Raylib.LoadShader("Assets/Shaders/shadowDepth.vert", "Assets/Shaders/shadowDepth.frag");
+Material shadowDepthMaterial = Raylib.LoadMaterialDefault();
+shadowDepthMaterial.Shader = shadowDepthShader;
+
+int lightSpaceMatrixLoc = Raylib.GetShaderLocation(lightingShader, "lightSpaceMatrix");
+int lightSpaceMatrixFarLoc = Raylib.GetShaderLocation(lightingShader, "lightSpaceMatrixFar");
+int viewPosLoc = Raylib.GetShaderLocation(lightingShader, "viewPos");
+Raylib.SetShaderValueTexture(lightingShader, Raylib.GetShaderLocation(lightingShader, "shadowMap"), shadowMap.Depth);
+Raylib.SetShaderValueTexture(lightingShader, Raylib.GetShaderLocation(lightingShader, "shadowMapFar"), shadowMapFar.Depth);
+
+// The light "camera" is an orthographic view aimed at the player from far
+// along -sunDirection, re-centered on the player every frame; its coverage
+// only needs to span the geometry actually near the player, not the whole
+// (possibly huge) chunk, since anything farther than that is barely visible
+// anyway.
+float shadowCoverage = Math.Clamp(faceEdgeLength * 2.5f, 20f, 150f);
+float shadowLightDistance = shadowCoverage * 1.5f;
+const float ShadowCoverageFar = 500f;
+const float ShadowLightDistanceFar = ShadowCoverageFar * 1.5f;
+Vector3 sunUpHint = MathF.Abs(Vector3.Dot(sunDirection, Vector3.UnitY)) > 0.9f ? Vector3.UnitX : Vector3.UnitY;
 
 // Only the current planet chunk (base icosahedron face) and its neighbours
 // have block geometry built and uploaded at any time. Builds run on
@@ -184,6 +291,10 @@ Mesh[] UploadChunkMeshData(ChunkMeshData[] data)
             Marshal.Copy(d.TexCoords, 0, tPtr, d.TexCoords.Length);
             mesh.TexCoords = (float*)tPtr;
 
+            IntPtr nPtr = Marshal.AllocHGlobal(d.Normals.Length * sizeof(float));
+            Marshal.Copy(d.Normals, 0, nPtr, d.Normals.Length);
+            mesh.Normals = (float*)nPtr;
+
             int indexBytes = d.Indices.Length * sizeof(ushort);
             IntPtr iPtr = Marshal.AllocHGlobal(indexBytes);
             fixed (ushort* iSrc = d.Indices)
@@ -204,11 +315,12 @@ void UpdateLoadedChunks(int baseFaceId)
     {
         if (!loadedChunks.ContainsKey(id) && !pendingChunkBuilds.ContainsKey(id))
         {
-            // Snapshot on the calling thread - brokenLayers may keep
-            // changing on the main thread while this build runs in the background.
+            // Snapshot on the calling thread - brokenLayers/placedLayers may
+            // keep changing on the main thread while this build runs in the background.
             var brokenSnapshot = new HashSet<(int, int, int)>(brokenLayers);
+            var placedSnapshot = new HashSet<(int, int, int)>(placedLayers);
             pendingChunkBuilds[id] = Task.Run(() =>
-                BuildChunkMeshData(id, vertices, triangles, faces, trianglesByBaseFace, latticeCells, BlockHeight, brokenSnapshot, layersPerColumn));
+                BuildChunkMeshData(id, vertices, triangles, faces, trianglesByBaseFace, latticeCells, BlockHeight, brokenSnapshot, placedSnapshot, layersPerColumn));
         }
     }
 
@@ -234,8 +346,9 @@ void RebuildChunk(int baseFaceId)
 
     if (!desiredChunks.Contains(baseFaceId)) return;
     var brokenSnapshot = new HashSet<(int, int, int)>(brokenLayers);
+    var placedSnapshot = new HashSet<(int, int, int)>(placedLayers);
     pendingChunkBuilds[baseFaceId] = Task.Run(() =>
-        BuildChunkMeshData(baseFaceId, vertices, triangles, faces, trianglesByBaseFace, latticeCells, BlockHeight, brokenSnapshot, layersPerColumn));
+        BuildChunkMeshData(baseFaceId, vertices, triangles, faces, trianglesByBaseFace, latticeCells, BlockHeight, brokenSnapshot, placedSnapshot, layersPerColumn));
 }
 
 // Picks up finished background builds and uploads them; called every frame.
@@ -278,7 +391,7 @@ float standingSurfaceHeight = layersPerColumn * BlockHeight;
 desiredChunks = new HashSet<int>(baseFaceNeighbors[currentBaseFace]) { currentBaseFace };
 foreach (int id in desiredChunks)
     loadedChunks[id] = UploadChunkMeshData(
-        BuildChunkMeshData(id, vertices, triangles, faces, trianglesByBaseFace, latticeCells, BlockHeight, brokenLayers, layersPerColumn));
+        BuildChunkMeshData(id, vertices, triangles, faces, trianglesByBaseFace, latticeCells, BlockHeight, brokenLayers, placedLayers, layersPerColumn));
 
 Camera3D camera = new()
 {
@@ -336,7 +449,7 @@ while (!Raylib.WindowShouldClose())
     // leaves currentFace pointing somewhere groundPos doesn't match.
     (tentative, int candidateFace) = UnfoldAcrossFaces(tentative, currentFace, faces, vertices);
 
-    float newBlockHeight = GetGroundHeightAt(tentative, candidateFace, vertices, triangles, blocksPerEdge, cellIndexLookup, brokenLayers, layersPerColumn, feetHeight);
+    float newBlockHeight = GetGroundHeightAt(tentative, candidateFace, vertices, triangles, blocksPerEdge, cellIndexLookup, brokenLayers, placedLayers, layersPerColumn, feetHeight);
     bool wasGrounded = airHeight <= 0f;
     float groundBlockHeight;
     // Compare against feetHeight (current absolute foot elevation, including
@@ -391,6 +504,16 @@ while (!Raylib.WindowShouldClose())
     camera.Target = eyePos + lookDir;
     camera.Up = visualUp;
 
+    // The column/layer range the player's own body currently occupies, so a
+    // placement landing inside it can be rejected below - otherwise you could
+    // wall yourself into a block that then blocks your own movement/vertical
+    // resolution (there's no push-out logic anywhere else in the game).
+    (int playerI, int playerJ, int playerSlot) = ResolveBlockCell(groundPos, currentFace, vertices, triangles, blocksPerEdge);
+    int playerCellIdx = cellIndexLookup[playerI, playerJ, playerSlot];
+    if (playerCellIdx < 0) playerCellIdx = cellIndexLookup[playerI, playerJ, 0];
+    float playerFeetHeight = groundBlockHeight + airHeight;
+    float playerHeadHeight = playerFeetHeight + EyeHeight;
+
     // --- crosshair targeting: raymarch the actual 3D look ray (so pitch
     // matters) across the block columns, walking across faces the same way
     // WASD movement does. Each column is a stack of layersPerColumn slabs
@@ -400,6 +523,8 @@ while (!Raylib.WindowShouldClose())
     // by a broken layer above it. ---
     bool hasTarget = false;
     int targetFace = -1, targetI = 0, targetJ = 0, targetSlot = 0, targetLayer = 0;
+    bool hasPlacementTarget = false;
+    int placementFace = -1, placementCellIdx = 0, placementLayer = 0;
     {
         const int raySteps = 48;
         float stepSize = reachDistance / raySteps;
@@ -407,6 +532,14 @@ while (!Raylib.WindowShouldClose())
         Vector3 rayPoint = eyePos;
         for (int step = 1; step <= raySteps; step++)
         {
+            // The ray's position/face one step earlier, already unfolded onto
+            // whichever face it was on - exactly where a placed block would
+            // sit if this step turns out to hit something solid, however that
+            // direction happens to be (on top of, or into the side of, the
+            // target column - or even a neighboring column across an edge).
+            Vector3 prevPoint = rayPoint;
+            int prevFace = rayFace;
+
             rayPoint += lookDir * stepSize;
             (rayPoint, rayFace) = UnfoldAcrossFaces(rayPoint, rayFace, faces, vertices);
             Face rf = faces[rayFace];
@@ -417,22 +550,53 @@ while (!Raylib.WindowShouldClose())
             if (cellIdx < 0) cellIdx = cellIndexLookup[i, j, 0]; // outermost diagonal row has no slot-1 cell
 
             int layerHere = (int)MathF.Floor(sampleHeight / BlockHeight);
+            bool solidHere = layerHere >= 0 && layerHere < MaxLayersPerColumn &&
+                (layerHere < layersPerColumn
+                    ? !brokenLayers.Contains((rayFace, cellIdx, layerHere))
+                    : placedLayers.Contains((rayFace, cellIdx, layerHere)));
+
             if (layerHere < 0)
             {
                 break; // somehow below the ground plane - nothing to hit
             }
-            else if (layerHere >= layersPerColumn)
+            else if (!solidHere)
             {
-                continue; // above the whole column - open air, keep marching
+                continue; // open air (above the column, a gap, or empty headroom) - keep marching
             }
-            else if (!brokenLayers.Contains((rayFace, cellIdx, layerHere)))
+            else
             {
                 targetI = i; targetJ = j; targetSlot = slot; targetLayer = layerHere;
                 targetFace = rayFace;
                 hasTarget = true;
+
+                // Only a valid placement spot if the previous step landed on
+                // a real gap within the buildable range - not below ground,
+                // not already solid, and not above the absolute ceiling.
+                Face pf = faces[prevFace];
+                float prevSampleHeight = Vector3.Dot(prevPoint - vertices[pf.VA], pf.Normal);
+                int prevLayer = (int)MathF.Floor(prevSampleHeight / BlockHeight);
+                if (prevLayer >= 0 && prevLayer < MaxLayersPerColumn)
+                {
+                    (int pi, int pj, int pslot) = ResolveBlockCell(prevPoint, prevFace, vertices, triangles, blocksPerEdge);
+                    int pCellIdx = cellIndexLookup[pi, pj, pslot];
+                    if (pCellIdx < 0) pCellIdx = cellIndexLookup[pi, pj, 0];
+                    bool prevSolid = prevLayer < layersPerColumn
+                        ? !brokenLayers.Contains((prevFace, pCellIdx, prevLayer))
+                        : placedLayers.Contains((prevFace, pCellIdx, prevLayer));
+
+                    bool overlapsPlayer = prevFace == currentFace && pCellIdx == playerCellIdx &&
+                        prevLayer * BlockHeight < playerHeadHeight && (prevLayer + 1) * BlockHeight > playerFeetHeight;
+
+                    if (!prevSolid && !overlapsPlayer)
+                    {
+                        placementFace = prevFace;
+                        placementCellIdx = pCellIdx;
+                        placementLayer = prevLayer;
+                        hasPlacementTarget = true;
+                    }
+                }
                 break;
             }
-            // else: this layer's already broken - a gap - keep marching down through it.
         }
     }
 
@@ -440,14 +604,79 @@ while (!Raylib.WindowShouldClose())
     {
         int cellIdx = cellIndexLookup[targetI, targetJ, targetSlot];
         if (cellIdx < 0) cellIdx = cellIndexLookup[targetI, targetJ, 0]; // outermost diagonal row has no slot-1 cell
-        if (brokenLayers.Add((targetFace, cellIdx, targetLayer)))
-            RebuildChunk(faces[targetFace].BaseFaceId);
+        bool changed = targetLayer < layersPerColumn
+            ? brokenLayers.Add((targetFace, cellIdx, targetLayer))
+            : placedLayers.Remove((targetFace, cellIdx, targetLayer));
+        if (changed) RebuildChunk(faces[targetFace].BaseFaceId);
     }
+
+    if (hasPlacementTarget && Raylib.IsMouseButtonPressed(MouseButton.Right))
+    {
+        bool changed = placementLayer < layersPerColumn
+            ? brokenLayers.Remove((placementFace, placementCellIdx, placementLayer))
+            : placedLayers.Add((placementFace, placementCellIdx, placementLayer));
+        if (changed) RebuildChunk(faces[placementFace].BaseFaceId);
+    }
+
+    // --- shadow pass: render the loaded chunks' depth from the sun's point
+    // of view into shadowMap, re-centered on the player every frame. The
+    // main pass below samples this in lighting.frag so lighting respects
+    // actual occlusion (cave interiors go dark) instead of just each face's
+    // own normal versus sunDirection. ---
+    Camera3D lightCam = new()
+    {
+        Position = eyePos - sunDirection * shadowLightDistance,
+        Target = eyePos,
+        Up = sunUpHint,
+        FovY = shadowCoverage,
+        Projection = CameraProjection.Orthographic,
+    };
+    Matrix4x4 lightSpaceMatrix = Raylib.GetCameraViewMatrix(ref lightCam) * Raylib.GetCameraProjectionMatrix(ref lightCam, 1f);
+    Raylib.SetShaderValueMatrix(lightingShader, lightSpaceMatrixLoc, lightSpaceMatrix);
+
+    Camera3D lightCamFar = new()
+    {
+        Position = eyePos - sunDirection * ShadowLightDistanceFar,
+        Target = eyePos,
+        Up = sunUpHint,
+        FovY = ShadowCoverageFar,
+        Projection = CameraProjection.Orthographic,
+    };
+    Matrix4x4 lightSpaceMatrixFar = Raylib.GetCameraViewMatrix(ref lightCamFar) * Raylib.GetCameraProjectionMatrix(ref lightCamFar, 1f);
+    Raylib.SetShaderValueMatrix(lightingShader, lightSpaceMatrixFarLoc, lightSpaceMatrixFar);
+
+    Raylib.SetShaderValue(lightingShader, viewPosLoc, camera.Position, ShaderUniformDataType.Vec3);
+
+    Raylib.BeginTextureMode(shadowMap);
+    Rlgl.ClearScreenBuffers();
+    Raylib.BeginMode3D(lightCam);
+    foreach (Mesh[] chunkMeshes in loadedChunks.Values)
+        foreach (Mesh chunk in chunkMeshes) Raylib.DrawMesh(chunk, shadowDepthMaterial, Matrix4x4.Identity);
+    Raylib.EndMode3D();
+    Raylib.EndTextureMode();
+
+    Raylib.BeginTextureMode(shadowMapFar);
+    Rlgl.ClearScreenBuffers();
+    Raylib.BeginMode3D(lightCamFar);
+    foreach (Mesh[] chunkMeshes in loadedChunks.Values)
+        foreach (Mesh chunk in chunkMeshes) Raylib.DrawMesh(chunk, shadowDepthMaterial, Matrix4x4.Identity);
+    Raylib.EndMode3D();
+    Raylib.EndTextureMode();
 
     Raylib.BeginDrawing();
     Raylib.ClearBackground(new Color(15, 15, 25, 255));
 
     Raylib.BeginMode3D(camera);
+
+    // Camera-anchored, like a skybox element, so it always reads as
+    // "infinitely far" and keeps a constant apparent size regardless of
+    // where on the planet the player is standing. Distance is clamped well
+    // under raylib's default 1000-unit far clip plane even though
+    // worldRadius can grow much larger at high subdivision levels.
+    float sunDistance = Math.Clamp(worldRadius * 3f, 100f, 400f);
+    Vector3 sunPos = camera.Position + sunDirection * sunDistance;
+    Raylib.DrawSphere(sunPos, sunDistance * 0.05f, new Color(255, 240, 200, 255));
+
     foreach (Mesh[] chunkMeshes in loadedChunks.Values)
         foreach (Mesh chunk in chunkMeshes) Raylib.DrawMesh(chunk, fillMaterial, Matrix4x4.Identity);
     Rlgl.EnableWireMode();
@@ -465,7 +694,7 @@ while (!Raylib.WindowShouldClose())
     Raylib.DrawLine(crosshairX, crosshairY + crosshairGap, crosshairX, crosshairY + crosshairSize, crosshairColor);
 
     Raylib.DrawFPS(10, 10);
-    Raylib.DrawText("WASD to walk, mouse to look, space to jump, left click to break blocks, ESC to quit", 10, 40, 20, Color.RayWhite);
+    Raylib.DrawText("WASD to walk, mouse to look, space to jump, left click to break blocks, right click to place blocks, ESC to quit", 10, 40, 20, Color.RayWhite);
     Raylib.DrawText(
         $"Face #{currentFace} / {faces.Length:N0}   Chunk #{currentBaseFace} ({loadedChunks.Count} loaded, {pendingChunkBuilds.Count} building)",
         10, 65, 18, Color.LightGray);
@@ -474,6 +703,12 @@ while (!Raylib.WindowShouldClose())
 
 Raylib.EnableCursor();
 Raylib.UnloadTexture(blockAtlas);
+Raylib.UnloadShader(lightingShader);
+Raylib.UnloadShader(shadowDepthShader);
+Raylib.UnloadTexture(shadowMap.Depth);
+Rlgl.UnloadFramebuffer(shadowFboId);
+Raylib.UnloadTexture(shadowMapFar.Depth);
+Rlgl.UnloadFramebuffer(shadowFarFboId);
 Raylib.CloseWindow();
 return;
 
@@ -763,7 +998,8 @@ static (int I, int J, int Slot) ResolveBlockCell(
 // the planet's surface itself.
 static float GetGroundHeightAt(
     Vector3 position, int faceIdx, Vector3[] vertices, (int A, int B, int C)[] triangles, int blocksPerEdge,
-    int[,,] cellIndexLookup, HashSet<(int TriIdx, int CellIdx, int Layer)> brokenLayers, int layersPerColumn,
+    int[,,] cellIndexLookup, HashSet<(int TriIdx, int CellIdx, int Layer)> brokenLayers,
+    HashSet<(int TriIdx, int CellIdx, int Layer)> placedLayers, int layersPerColumn,
     float feetHeight)
 {
     (int i, int j, int slot) = ResolveBlockCell(position, faceIdx, vertices, triangles, blocksPerEdge);
@@ -772,31 +1008,31 @@ static float GetGroundHeightAt(
 
     const float eps = 1e-3f;
     float standingHeight = 0f;
-    for (int layer = 0; layer < layersPerColumn; layer++)
+    for (int layer = 0; layer < MaxLayersPerColumn; layer++)
     {
         float floor = layer * BlockHeight;
         if (floor > feetHeight + eps) break; // this and every layer above it is out of reach from here
-        if (!brokenLayers.Contains((faceIdx, cellIdx, layer)))
+        bool solid = layer < layersPerColumn
+            ? !brokenLayers.Contains((faceIdx, cellIdx, layer))
+            : placedLayers.Contains((faceIdx, cellIdx, layer));
+        if (solid)
             standingHeight = (layer + 1) * BlockHeight;
     }
     return standingHeight;
 }
 
-static Color HsvColor(float h, float s, float v)
+// Deterministically "paints" a column with one of the Materials tiles, from
+// a bit-mixing hash of its own (triangle, cell) position rather than a
+// counter - so neighboring columns get unrelated materials (a scattered
+// patchwork) instead of the smooth gradient a running index would produce,
+// while still being stable across chunk rebuilds (same inputs every time).
+static int HashToMaterial(int triIdx, int cellIdx)
 {
-    float c = v * s;
-    float x = c * (1 - MathF.Abs((h / 60f) % 2 - 1));
-    float m = v - c;
-    (float r, float g, float b) = h switch
-    {
-        < 60 => (c, x, 0f),
-        < 120 => (x, c, 0f),
-        < 180 => (0f, c, x),
-        < 240 => (0f, x, c),
-        < 300 => (x, 0f, c),
-        _ => (c, 0f, x),
-    };
-    return new Color((byte)((r + m) * 255), (byte)((g + m) * 255), (byte)((b + m) * 255), (byte)255);
+    uint x = (uint)triIdx * 0x9E3779B1u ^ (uint)cellIdx * 0x85EBCA77u;
+    x ^= x >> 15; x *= 0x2C1B3C6Du;
+    x ^= x >> 12; x *= 0x297A2D39u;
+    x ^= x >> 15;
+    return (int)(x % AtlasTileCount);
 }
 
 // ---------------------------------------------------------------------------
@@ -1068,19 +1304,19 @@ static ushort[] BuildBlockIndexTemplateWallsOnly() =>
 
 static ushort[] BuildBlockIndexTemplateFullWithBottom() =>
 [
-    6, 7, 8,          // top (cap)
-    0, 2, 1,          // bottom (cap, reversed winding to face down)
-    0, 1, 4, 0, 4, 3, // wall AB (floor edge p0->p1)
-    1, 2, 5, 1, 5, 4, // wall BC (floor edge p1->p2)
-    2, 0, 3, 2, 3, 5, // wall CA (floor edge p2->p0)
+    6, 7, 8,             // top (cap)
+    9, 11, 10,           // bottom (cap, own vertices/normal - reversed winding to face down)
+    0, 1, 4, 0, 4, 3,    // wall AB (floor edge p0->p1)
+    1, 2, 5, 1, 5, 4,    // wall BC (floor edge p1->p2)
+    2, 0, 3, 2, 3, 5,    // wall CA (floor edge p2->p0)
 ];
 
 static ushort[] BuildBlockIndexTemplateWallsWithBottom() =>
 [
-    0, 2, 1,          // bottom (cap, reversed winding to face down)
-    0, 1, 4, 0, 4, 3, // wall AB (floor edge p0->p1)
-    1, 2, 5, 1, 5, 4, // wall BC (floor edge p1->p2)
-    2, 0, 3, 2, 3, 5, // wall CA (floor edge p2->p0)
+    9, 11, 10,           // bottom (cap, own vertices/normal - reversed winding to face down)
+    0, 1, 4, 0, 4, 3,    // wall AB (floor edge p0->p1)
+    1, 2, 5, 1, 5, 4,    // wall BC (floor edge p1->p2)
+    2, 0, 3, 2, 3, 5,    // wall CA (floor edge p2->p0)
 ];
 
 // Builds the block geometry for one chunk (one base icosahedron face). Every
@@ -1099,12 +1335,15 @@ static ushort[] BuildBlockIndexTemplateWallsWithBottom() =>
 static ChunkMeshData[] BuildChunkMeshData(
     int baseFaceId, Vector3[] vertices, (int A, int B, int C)[] triangles, Face[] faces,
     List<int>[] trianglesByBaseFace, LatticeCell[] latticeCells, float blockHeight,
-    HashSet<(int TriIdx, int CellIdx, int Layer)> brokenLayers, int layersPerColumn)
+    HashSet<(int TriIdx, int CellIdx, int Layer)> brokenLayers,
+    HashSet<(int TriIdx, int CellIdx, int Layer)> placedLayers, int layersPerColumn)
 {
     List<int> triIndices = trianglesByBaseFace[baseFaceId];
     int blocksPerTriangle = latticeCells.Length;
     long totalColumns = (long)triIndices.Count * blocksPerTriangle;
     if (totalColumns == 0) return [];
+
+    (float Top, float Side)[] materials = BuildMaterials();
 
     var instances = new List<BlockInstance>();
     for (int triLocal = 0; triLocal < triIndices.Count; triLocal++)
@@ -1112,20 +1351,25 @@ static ChunkMeshData[] BuildChunkMeshData(
         int triIdx = triIndices[triLocal];
         for (int cellIdx = 0; cellIdx < blocksPerTriangle; cellIdx++)
         {
-            long columnIndex = (long)triLocal * blocksPerTriangle + cellIdx;
-            float hue = columnIndex / (float)totalColumns * 360f;
+            // "Random painting": each column's material is a deterministic hash
+            // of its own position, not a counter - so it looks scattered rather
+            // than banding smoothly across the chunk like the old hue-per-index
+            // gradient did, but stays identical every time this chunk rebuilds.
+            int materialIndex = HashToMaterial(triIdx, cellIdx);
 
-            bool LayerBroken(int layer) => brokenLayers.Contains((triIdx, cellIdx, layer));
+            bool LayerSolid(int layer) => layer < layersPerColumn
+                ? !brokenLayers.Contains((triIdx, cellIdx, layer))
+                : layer < MaxLayersPerColumn && placedLayers.Contains((triIdx, cellIdx, layer));
 
-            if (LayerBroken(0))
-                instances.Add(new BlockInstance(triIdx, cellIdx, 0, 0, true, false, hue, true));
+            if (brokenLayers.Contains((triIdx, cellIdx, 0)))
+                instances.Add(new BlockInstance(triIdx, cellIdx, 0, 0, true, false, materialIndex, true));
 
-            for (int layer = 0; layer < layersPerColumn; layer++)
+            for (int layer = 0; layer < MaxLayersPerColumn; layer++)
             {
-                if (LayerBroken(layer)) continue;
-                bool topExposed = layer == layersPerColumn - 1 || LayerBroken(layer + 1);
-                bool bottomExposed = layer > 0 && LayerBroken(layer - 1);
-                instances.Add(new BlockInstance(triIdx, cellIdx, layer, layer + 1, topExposed, bottomExposed, hue, false));
+                if (!LayerSolid(layer)) continue;
+                bool topExposed = layer == MaxLayersPerColumn - 1 || !LayerSolid(layer + 1);
+                bool bottomExposed = layer > 0 && !LayerSolid(layer - 1);
+                instances.Add(new BlockInstance(triIdx, cellIdx, layer, layer + 1, topExposed, bottomExposed, materialIndex, false));
             }
         }
     }
@@ -1167,6 +1411,7 @@ static ChunkMeshData[] BuildChunkMeshData(
         float[] positions = new float[vertexCount * 3];
         byte[] colors = new byte[vertexCount * 4];
         float[] texcoords = new float[vertexCount * 2];
+        float[] normals = new float[vertexCount * 3];
         ushort[] indices = new ushort[totalTriangles * 3];
 
         int indexCursor = 0;
@@ -1187,45 +1432,96 @@ static ChunkMeshData[] BuildChunkMeshData(
             Vector3 p0 = basep0 + floorOffset, p1 = basep1 + floorOffset, p2 = basep2 + floorOffset;
             Vector3 r0 = basep0 + roofOffset, r1 = basep1 + roofOffset, r2 = basep2 + roofOffset;
 
-            Color topCol = inst.Bare ? new Color(70, 70, 70, 255) : HsvColor(inst.Hue, 0.55f, 0.85f);
-            Color sideCol = inst.Bare ? topCol : HsvColor(inst.Hue, 0.65f, 0.5f); // darker/more saturated than the top
+            // Cheap baked ambient occlusion. Full corner AO (counting solid
+            // neighbor cells) would need horizontal neighbor-cell lookups
+            // that aren't available at this point, so this is a vertical
+            // occlusion proxy from data already on hand: a wall whose top
+            // isn't exposed (topExposed false - something solid sits
+            // directly above, e.g. a tunnel roof) reads as more enclosed and
+            // gets less bounced ambient light, and a floor resting on solid
+            // ground (bottomExposed false) gets a touch of contact darkening
+            // at its base. Multiplies straight into the vertex color, which
+            // lighting.frag already folds into the final shading.
+            const byte TopAo = 209;    // ~0.82 of 255
+            const byte BottomAo = 230; // ~0.90 of 255
+            byte topShade = inst.IncludeCap ? (byte)255 : TopAo;
+            byte bottomShade = inst.IncludeBottomCap ? (byte)255 : BottomAo;
+            Color topCol = new Color(topShade, topShade, topShade, (byte)255);
+            Color bottomCol = new Color(bottomShade, bottomShade, bottomShade, (byte)255);
 
-            // Atlas tiles: 0 = grass top, 1 = dirt side, 2 = bare ground -
-            // a bare instance's cap uses the bare tile instead of grass.
-            float topTile = inst.Bare ? AtlasTileBare : AtlasTileTop;
-            float sideTile = inst.Bare ? AtlasTileBare : AtlasTileSide;
+            // True outward wall normals (not the flat top normal) so each
+            // wall shades according to which way it actually faces, not just
+            // whichever way the block's parent triangle points. Each floor
+            // corner is shared by two walls in the index templates, so its
+            // normal is the average of those two walls' normals - a cheap
+            // "smoothed corner" that also avoids a hard lighting seam right
+            // at each vertical edge.
+            Vector3 triCentroid = (basep0 + basep1 + basep2) / 3f;
+            Vector3 wallAB = ComputeWallNormal(basep0, basep1, normal, triCentroid);
+            Vector3 wallBC = ComputeWallNormal(basep1, basep2, normal, triCentroid);
+            Vector3 wallCA = ComputeWallNormal(basep2, basep0, normal, triCentroid);
+            Vector3 corner0Normal = Vector3.Normalize(wallCA + wallAB);
+            Vector3 corner1Normal = Vector3.Normalize(wallAB + wallBC);
+            Vector3 corner2Normal = Vector3.Normalize(wallBC + wallCA);
+
+            float topTile = inst.Bare ? AtlasTileBare : materials[inst.MaterialIndex].Top;
+            float sideTile = inst.Bare ? AtlasTileBare : materials[inst.MaterialIndex].Side;
 
             int vertexBase = localBlock * VerticesPerBlock;
-            WriteBlockVertex(positions, colors, texcoords, vertexBase + 0, p0, sideCol, 0f, 0f, sideTile);
-            WriteBlockVertex(positions, colors, texcoords, vertexBase + 1, p1, sideCol, 1f, 0f, sideTile);
-            WriteBlockVertex(positions, colors, texcoords, vertexBase + 2, p2, sideCol, 0f, 1f, sideTile);
-            WriteBlockVertex(positions, colors, texcoords, vertexBase + 3, r0, sideCol, 0f, 0f, sideTile);
-            WriteBlockVertex(positions, colors, texcoords, vertexBase + 4, r1, sideCol, 1f, 0f, sideTile);
-            WriteBlockVertex(positions, colors, texcoords, vertexBase + 5, r2, sideCol, 0f, 1f, sideTile);
-            WriteBlockVertex(positions, colors, texcoords, vertexBase + 6, r0, topCol, 0f, 0f, topTile);
-            WriteBlockVertex(positions, colors, texcoords, vertexBase + 7, r1, topCol, 1f, 0f, topTile);
-            WriteBlockVertex(positions, colors, texcoords, vertexBase + 8, r2, topCol, 0f, 1f, topTile);
+            WriteBlockVertex(positions, colors, texcoords, normals, vertexBase + 0, p0, corner0Normal, bottomCol, 0f, 0f, sideTile);
+            WriteBlockVertex(positions, colors, texcoords, normals, vertexBase + 1, p1, corner1Normal, bottomCol, 1f, 0f, sideTile);
+            WriteBlockVertex(positions, colors, texcoords, normals, vertexBase + 2, p2, corner2Normal, bottomCol, 0f, 1f, sideTile);
+            WriteBlockVertex(positions, colors, texcoords, normals, vertexBase + 3, r0, corner0Normal, topCol, 0f, 0f, sideTile);
+            WriteBlockVertex(positions, colors, texcoords, normals, vertexBase + 4, r1, corner1Normal, topCol, 1f, 0f, sideTile);
+            WriteBlockVertex(positions, colors, texcoords, normals, vertexBase + 5, r2, corner2Normal, topCol, 0f, 1f, sideTile);
+            WriteBlockVertex(positions, colors, texcoords, normals, vertexBase + 6, r0, normal, topCol, 0f, 0f, topTile);
+            WriteBlockVertex(positions, colors, texcoords, normals, vertexBase + 7, r1, normal, topCol, 1f, 0f, topTile);
+            WriteBlockVertex(positions, colors, texcoords, normals, vertexBase + 8, r2, normal, topCol, 0f, 1f, topTile);
+            // Bottom cap: its own copy of the floor corners, facing straight
+            // down (-normal) - can't reuse vertices 0/1/2, which need the
+            // outward wall normal instead, or one of the two faces would end
+            // up lit as if it faced the sun regardless of which way it really
+            // points (the bug seen inside tunnels: undersides glowing bright).
+            WriteBlockVertex(positions, colors, texcoords, normals, vertexBase + 9, p0, -normal, bottomCol, 0f, 0f, sideTile);
+            WriteBlockVertex(positions, colors, texcoords, normals, vertexBase + 10, p1, -normal, bottomCol, 1f, 0f, sideTile);
+            WriteBlockVertex(positions, colors, texcoords, normals, vertexBase + 11, p2, -normal, bottomCol, 0f, 1f, sideTile);
 
             ushort[] template = TemplateFor(inst, fullTemplate, wallsOnlyTemplate, fullWithBottomTemplate, wallsWithBottomTemplate);
             foreach (ushort t in template)
                 indices[indexCursor++] = (ushort)(vertexBase + t);
         }
 
-        meshes[chunk] = new ChunkMeshData(positions, colors, texcoords, indices, vertexCount, totalTriangles);
+        meshes[chunk] = new ChunkMeshData(positions, colors, texcoords, normals, indices, vertexCount, totalTriangles);
     }
 
     return meshes;
 }
 
+// Outward-facing normal of the wall quad running along edge (edgeA -> edgeB)
+// of a block's floor triangle. Cross the edge with the face's own "up" to get
+// a normal perpendicular to both the edge and the vertical, then flip it if
+// it happens to point back toward the triangle's own centroid instead of away
+// from it.
+static Vector3 ComputeWallNormal(Vector3 edgeA, Vector3 edgeB, Vector3 up, Vector3 triangleCentroid)
+{
+    Vector3 candidate = Vector3.Normalize(Vector3.Cross(edgeB - edgeA, up));
+    Vector3 edgeMid = (edgeA + edgeB) * 0.5f;
+    if (Vector3.Dot(candidate, edgeMid - triangleCentroid) < 0f) candidate = -candidate;
+    return candidate;
+}
+
 static void WriteBlockVertex(
-    float[] positions, byte[] colors, float[] texcoords, int vertexIndex,
-    Vector3 v, Color col, float u, float w, float tileU)
+    float[] positions, byte[] colors, float[] texcoords, float[] normals, int vertexIndex,
+    Vector3 v, Vector3 normal, Color col, float u, float w, float tileU)
 {
     int p = vertexIndex * 3;
     positions[p + 0] = v.X; positions[p + 1] = v.Y; positions[p + 2] = v.Z;
 
     int uv = vertexIndex * 2;
     texcoords[uv + 0] = tileU + u * AtlasTileWidth; texcoords[uv + 1] = w;
+
+    int n = vertexIndex * 3;
+    normals[n + 0] = normal.X; normals[n + 1] = normal.Y; normals[n + 2] = normal.Z;
 
     int cIdx = vertexIndex * 4;
     colors[cIdx + 0] = col.R;
@@ -1244,7 +1540,7 @@ readonly record struct Face(
 // on the bottom if the layer below is missing - or, when layer 0 itself is
 // broken, a single flat bare-ground tile (FloorLayer = RoofLayer = 0).
 readonly record struct BlockInstance(
-    int TriIdx, int CellIdx, int FloorLayer, int RoofLayer, bool IncludeCap, bool IncludeBottomCap, float Hue, bool Bare);
+    int TriIdx, int CellIdx, int FloorLayer, int RoofLayer, bool IncludeCap, bool IncludeBottomCap, int MaterialIndex, bool Bare);
 
 // One small triangle within a base mesh triangle's barycentric lattice,
 // described as fractional (u, v) coordinates along edges AB/AC of its
@@ -1255,4 +1551,4 @@ readonly record struct LatticeCell(float U0, float V0, float U1, float V1, float
 // can be built on a background thread. UploadChunkMeshData does the
 // GL-context-bound part (Marshal alloc + UploadMesh) on the main thread.
 readonly record struct ChunkMeshData(
-    float[] Positions, byte[] Colors, float[] TexCoords, ushort[] Indices, int VertexCount, int TriangleCount);
+    float[] Positions, byte[] Colors, float[] TexCoords, float[] Normals, ushort[] Indices, int VertexCount, int TriangleCount);

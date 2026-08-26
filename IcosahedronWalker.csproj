@@ -14,6 +14,7 @@
 
   <ItemGroup>
     <None Include="Assets\Textures\**\*.*" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Assets\Shaders\**\*.*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
