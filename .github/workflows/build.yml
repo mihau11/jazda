@@ -46,7 +46,23 @@ jobs:
           fi
 
       - name: Build
-        run: gradle --no-daemon ${{ steps.variant.outputs.task }}
+        run: |
+          set -o pipefail
+          gradle --no-daemon --stacktrace ${{ steps.variant.outputs.task }} 2>&1 | tee build.log
+
+      # Logi Actions widac dopiero po zalogowaniu; przy bledzie odkladamy ogon logu
+      # na pomocnicza galaz ci-logs, zeby dalo sie go pobrac zwyklym gitem.
+      # Push idzie na credentialach z actions/checkout - zadnych tokenow w skrypcie.
+      - name: Opublikuj log przy bledzie
+        if: failure()
+        run: |
+          git config user.email actions@github.com
+          git config user.name "GitHub Actions"
+          git worktree add --orphan -b ci-logs /tmp/cilog
+          tail -n 400 build.log > /tmp/cilog/build.log
+          git -C /tmp/cilog add -A
+          git -C /tmp/cilog commit -q -m "log z runu ${{ github.run_id }}"
+          git -C /tmp/cilog push -q -f origin ci-logs
 
       - name: Zbierz APK
         id: apk
