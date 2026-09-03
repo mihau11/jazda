@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="widget_text">#FFFFFFFF</color>
+    <color name="bg_stereo">#FF2E4B7A</color>
+    <color name="bg_mono">#FFB0561F</color>
+    <color name="command_bg">#22808080</color>
+</resources>

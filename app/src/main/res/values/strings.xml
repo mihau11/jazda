@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Mono Widget</string>
+    <string name="widget_label">Mono / Stereo</string>
+    <string name="widget_description">Przełącza systemowy dźwięk mono jednym tapnięciem.</string>
+
+    <string name="state_mono">MONO</string>
+    <string name="state_stereo">STEREO</string>
+
+    <string name="cd_widget_mono">Dźwięk mono włączony. Dotknij, aby przełączyć na stereo.</string>
+    <string name="cd_widget_stereo">Dźwięk stereo. Dotknij, aby przełączyć na mono.</string>
+
+    <string name="label_current_state">Aktualny stan</string>
+    <string name="permission_granted">Uprawnienie nadane — widget przełącza natychmiast.</string>
+    <string name="permission_missing">Brak uprawnienia WRITE_SECURE_SETTINGS — widget otworzy ustawienia zamiast przełączyć.</string>
+
+    <string name="action_toggle">Przełącz teraz</string>
+    <string name="action_open_settings">Otwórz ustawienia dostępności</string>
+    <string name="action_copy">Kopiuj komendę</string>
+
+    <string name="hint_grant">Aby widget przełączał od razu, nadaj uprawnienie jednorazowo z komputera (telefon w trybie debugowania USB lub bezprzewodowego):</string>
+
+    <string name="toast_copied">Skopiowano do schowka</string>
+    <string name="toast_no_permission">Brak uprawnienia — nadaj je komendą ADB z aplikacji Mono Widget.</string>
+</resources>

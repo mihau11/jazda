@@ -1,0 +1,69 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      SIGNING_KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+      SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+      SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      # Repo nie zawiera gradle-wrapper.jar (plik binarny), wiec Gradle dostarcza ta akcja.
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Wybierz wariant
+        id: variant
+        run: |
+          if [ -n "$SIGNING_KEYSTORE_B64" ]; then
+            echo "task=assembleRelease" >> "$GITHUB_OUTPUT"
+            echo "dir=release" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Brak sekretu SIGNING_KEYSTORE_B64 - buduje wariant debug (losowy klucz, aktualizacja w miejscu sie nie uda)."
+            echo "task=assembleDebug" >> "$GITHUB_OUTPUT"
+            echo "dir=debug" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build
+        run: gradle --no-daemon ${{ steps.variant.outputs.task }}
+
+      - name: Zbierz APK
+        id: apk
+        run: |
+          mkdir -p out
+          find app/build/outputs/apk/${{ steps.variant.outputs.dir }} -name '*.apk' -exec cp {} out/mono-widget-${{ steps.variant.outputs.dir }}.apk \;
+          ls -l out
+          echo "path=out/mono-widget-${{ steps.variant.outputs.dir }}.apk" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mono-widget-apk
+          path: out/*.apk
+          if-no-files-found: error
+
+      - name: Release (tylko dla tagow v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*.apk
